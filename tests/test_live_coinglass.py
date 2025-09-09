@@ -19,6 +19,10 @@ class TestLiveCoinglass(unittest.TestCase):
         key_file = os.getenv("COINGLASS_API_KEY_FILE")
         if key_file and Path(key_file).exists():
             return Path(key_file).read_text(encoding="utf-8").strip()
+        # Fallback to repo default location if present
+        default_file = Path("secrets/coinglass_api_key.txt")
+        if default_file.exists():
+            return default_file.read_text(encoding="utf-8").strip()
         self.skipTest(
             "Provide COINGLASS_API_KEY or COINGLASS_API_KEY_FILE to run live test"
         )
@@ -95,4 +99,3 @@ class TestLiveCoinglass(unittest.TestCase):
             self.assertTrue(fp.exists(), "funding_8h file not created")
             contents = fp.read_text(encoding="utf-8").strip().splitlines()
             self.assertGreater(len(contents), 0, "No funding_8h rows returned")
-

@@ -78,14 +78,14 @@ ENDPOINTS: Dict[str, Endpoint] = {
     ),
     "funding_8h": Endpoint(
         dataset="funding_8h",
-        preferred="/api/futures/fundingRate/ohlc-history",
-        fallback=None,
+        preferred="/api/futures/funding-rate/history",
+        fallback="/api/futures/fundingRate/ohlc-history",
         level="symbol",
     ),
     "funding_pred_5m": Endpoint(
         dataset="funding_pred_5m",
-        preferred="/api/futures/fundingRate/ohlc-history",
-        fallback=None,
+        preferred="/api/futures/funding-rate/history",
+        fallback="/api/futures/fundingRate/ohlc-history",
         level="symbol",
     ),
     "oi_5m_ohlc": Endpoint(
