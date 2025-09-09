@@ -1,0 +1,84 @@
+run:
+  run_id: "20250101-000000"
+  artifacts_root: "./artifacts"
+
+universe:
+  symbols: ["BTCUSDT", "ETHUSDT"]
+  tiering: { A: ["BTCUSDT","ETHUSDT"], B: 20, C: 30 }
+
+acquisition:
+  mode: coinglass_only
+  days: 30
+  coinglass:
+    base_url: https://open-api-v4.coinglass.com
+    api_key_env: COINGLASS_API_KEY
+    exchange: binance
+    quote: USDT
+    prefer_aggregated: true
+    paging: { page_limit: 500, backoff_initial_s: 1, backoff_max_s: 64 }
+    intervals:
+      futures_ohlcv: "5m"
+      spot_ohlcv:    "5m"
+      funding_8h:    "8h"
+      funding_5m:    "5m"   # predicted funding (normalized to funding_pred_5m)
+      oi_ohlc:       "5m"
+      taker_volume:  "5m"   # normalized to taker_futures_5m
+      taker_spot_5m: "5m"
+      liquidation:   "5m"
+      orderbook_sample: "last_of_5m"
+      orderbook_range_bp: 10
+    per_series_mode:
+      futures_ohlcv: exchange
+      spot_ohlcv:    exchange
+      funding_8h:    exchange
+      funding_5m:    exchange  # normalized to funding_pred_5m
+      oi_5m:         aggregated
+      ls_ratio:      aggregated
+      taker_futures: exchange
+      taker_spot:    exchange
+      liquidation:   aggregated
+      orderbook:     exchange
+      onchain:       aggregated
+      etf:           aggregated
+  enable:
+    spot_ohlcv_5m: true
+    funding_pred_5m: false
+    taker_spot_5m:  false
+    orderbook_spot_5m: false
+    onchain_balances_daily: false
+    etf_flows_daily: false
+
+features:
+  qc:
+    drop_day_if_missing_minute_ratio_gt: 0.01
+  funding:
+    settlement_hours_utc: [0, 8, 16]
+
+model:
+  algo: isolation_forest
+  random_state: 42
+  train_window_days: 30
+  retrain_every_hours: 8
+  threshold_q: 0.97
+  min_feature_coverage: 0.95
+  scaler: { type: robust, clip_quantiles: [0.01, 0.99] }
+  iforest_defaults: { contamination: "auto", max_features: 0.70, bootstrap: false, n_jobs: -1 }
+  per_tier_overrides:
+    A: { n_estimators: 300, max_samples: 512,  max_features: 0.70, contamination: "auto" }
+    B: { n_estimators: 500, max_samples: 1024, max_features: 0.70, contamination: "auto" }
+    C: { n_estimators: 500, max_samples: 1024, max_features: 0.60, contamination: "auto" }
+
+alerts:
+  persist_k_5m: 2
+  storm_confirm_k_5m: { A: 1, default: 2 }
+  cooldown_bars: 12
+
+labels:
+  pct_move: 0.05
+  horizons_min: [30, 60, 90, 120]
+
+conventions:
+  symbol_to_coin: { BTCUSDT: BTC, ETHUSDT: ETH }
+  units: { taker_volume: base, liquidation_notional: USDT, open_interest: contracts }
+  orderbook: { max_snapshot_age_s: 60 }
+
