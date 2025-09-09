@@ -9,6 +9,7 @@ from .config import load_config, validate_config, main as config_main
 from .retrieve.coinglass import run_retrieve
 from .audit import main as audit_main
 from .feature.engine import main as feature_main
+from .backtest.engine import main as backtest_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -34,6 +35,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_feat.add_argument("config", type=str)
     p_feat.add_argument("--data", type=str, default="data")
     p_feat.add_argument("--out", type=str, default="features")
+
+    p_bt = sub.add_parser("backtest", help="Run walk-forward IsolationForest backtest")
+    p_bt.add_argument("config", type=str)
+    p_bt.add_argument("--features", type=str, default="features")
+    p_bt.add_argument("--artifacts-root", type=str)
 
     args = parser.parse_args(argv)
 
@@ -81,6 +87,12 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.cmd == "feature":
         return feature_main([args.config, "--data", args.data, "--out", args.out])
+
+    if args.cmd == "backtest":
+        argv = [args.config, "--features", args.features]
+        if args.artifacts_root:
+            argv += ["--artifacts-root", args.artifacts_root]
+        return backtest_main(argv)
 
     return 0
 
