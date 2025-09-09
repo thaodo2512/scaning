@@ -173,6 +173,74 @@ class TestRetrieve(unittest.TestCase):
                 coins = sorted({c["params"].get("coin") for c in agg_calls})
                 self.assertEqual(coins, ["BTC", "ETH"])
 
+    def test_incremental_start_time_uses_last_saved_ts_plus_one(self):
+        with tempfile.TemporaryDirectory() as td:
+            tdp = Path(td)
+            cfg = cfg_for_retrieve(tdp)
+            # Use 1 day, but control 'now' near the inserted ts via mock
+            cfg["acquisition"]["days"] = 1
+            eff, warns, errs = validate_config(cfg, require_env=False)
+            self.assertEqual(errs, [])
+
+            # First run writes data
+            def first_iter(base_url, headers, path, params, page_limit, backoff_initial, backoff_max):
+                if path.endswith("/api/price/ohlc-history"):
+                    return iter([{"ts": 1700000000000}])
+                if path.endswith("/api/futures/openInterest/ohlc-history"):
+                    return iter([{ "ts": 1700000005000 }])
+                if "/orderbook/ask-bids-history" in path:
+                    return iter([{ "ts": 1700000000000 }])
+                if path.endswith("/api/futures/openInterest/ohlc-aggregated-history"):
+                    return iter(())
+                return iter(())
+
+            with mock.patch("cryptostorm.retrieve.coinglass._page_iter", side_effect=first_iter):
+                run_retrieve(
+                    eff,
+                    base_url="https://open-api-v4.coinglass.com",
+                    exchange="binance",
+                    quote="USDT",
+                    page_limit=50,
+                    backoff_initial=0.01,
+                    backoff_max=0.02,
+                    out_root=tdp / "data",
+                    api_key="DUMMY",
+                    dry_run=False,
+                )
+
+            # Second run: capture params and assert startTime equals last_ts+1, using fixed now
+            calls = []
+
+            def second_iter(base_url, headers, path, params, page_limit, backoff_initial, backoff_max):
+                calls.append({"path": path, "params": dict(params)})
+                return iter(())
+
+            with mock.patch("cryptostorm.retrieve.coinglass._page_iter", side_effect=second_iter), \
+                 mock.patch("cryptostorm.retrieve.coinglass._utc_now_ms", return_value=1700000006000):
+                run_retrieve(
+                    eff,
+                    base_url="https://open-api-v4.coinglass.com",
+                    exchange="binance",
+                    quote="USDT",
+                    page_limit=50,
+                    backoff_initial=0.01,
+                    backoff_max=0.02,
+                    out_root=tdp / "data",
+                    api_key="DUMMY",
+                    dry_run=False,
+                )
+
+            # Map expected last ts per dataset for BTCUSDT
+            expected_start = {
+                "/api/price/ohlc-history": 1700000000001,
+                "/api/futures/openInterest/ohlc-history": 1700000005001,
+                "/api/futures/orderbook/ask-bids-history": 1700000000001,
+            }
+            for c in calls:
+                path = c["path"]
+                if path in expected_start:
+                    self.assertEqual(c["params"]["startTime"], expected_start[path])
+
 
 if __name__ == "__main__":
     unittest.main()

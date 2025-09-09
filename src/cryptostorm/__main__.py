@@ -7,6 +7,7 @@ from typing import Optional
 
 from .config import load_config, validate_config, main as config_main
 from .retrieve.coinglass import run_retrieve
+from .audit import main as audit_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -22,6 +23,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_ret.add_argument("--out", type=str, default="data")
     p_ret.add_argument("--dry-run", action="store_true")
     p_ret.add_argument("--log-level", type=str, default="INFO")
+
+    p_aud = sub.add_parser("audit", help="Audit data coverage for the 30d window")
+    p_aud.add_argument("config", type=str)
+    p_aud.add_argument("--data", type=str, default="data")
+    p_aud.add_argument("--min-ratio", type=float, default=0.95)
 
     args = parser.parse_args(argv)
 
@@ -64,9 +70,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         )
         return 0
 
+    if args.cmd == "audit":
+        return audit_main([args.config, "--data", args.data, "--min-ratio", str(args.min_ratio)])
+
     return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

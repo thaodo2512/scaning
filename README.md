@@ -40,3 +40,8 @@
 - All tests (Items 1–2):
   - `bash scripts/test.sh`
   - or `PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py' -v`
+
+## Verify 30‑Day Coverage
+- Audit that each dataset has enough rows in the rolling 30‑day window:
+  - `PYTHONPATH=src python -m cryptostorm audit configs/example.yaml --data data --min-ratio 0.95`
+- Output shows observed vs expected counts per symbol/dataset and fails if any ratio falls below the threshold.

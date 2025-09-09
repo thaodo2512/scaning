@@ -261,6 +261,30 @@ def _load_existing_keys(path: Path) -> Tuple[set, set]:
     return ts_keys, hashes
 
 
+def _max_saved_ts(path: Path) -> Optional[int]:
+    """Scan a JSONL file and return the maximum ts value found.
+
+    Returns None if the file does not exist or contains no ts values.
+    """
+    if not path.exists():
+        return None
+    max_ts: Optional[int] = None
+    try:
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                ts = obj.get("ts")
+                if isinstance(ts, (int, float)):
+                    v = int(ts)
+                    max_ts = v if max_ts is None or v > max_ts else max_ts
+    except Exception:
+        return max_ts
+    return max_ts
+
+
 def _persist_jsonl(out_path: Path, items: Iterable[Mapping[str, Any]], *, symbol: str, interval: Optional[str], mode: Optional[str], endpoint: str, aggregated: bool) -> Tuple[int, int]:
     # returns (written, skipped)
     written = 0
@@ -306,9 +330,9 @@ def run_retrieve(
     api_key: Optional[str] = None,
     dry_run: bool = False,
 ) -> None:
-    # Compute time window
+    # Compute global time window
     end_ms = _utc_now_ms()
-    start_ms = end_ms - eff.days * 24 * 60 * 60 * 1000
+    base_start_ms = end_ms - eff.days * 24 * 60 * 60 * 1000
 
     if not api_key and not dry_run:
         raise RuntimeError(
@@ -338,6 +362,17 @@ def run_retrieve(
                     target_value = sym[: -len(quote)]
             interval = ds_cfg.interval
             mode = ds_cfg.mode
+            # Build output path under data/<SYM>/ and compute delta start
+            out_dir = out_root / sym
+            _ensure_dir(out_dir)
+            out_file = out_dir / _output_filename(ds_key)
+            last_ts = _max_saved_ts(out_file)
+            start_ms_local = base_start_ms
+            if isinstance(last_ts, int):
+                start_ms_local = max(base_start_ms, last_ts + 1)
+            if start_ms_local >= end_ms:
+                LOG.info("up-to-date %s %s (no new range)", ds_key, sym)
+                continue
             params, aggregated = _build_params(
                 eff,
                 ds_key,
@@ -346,13 +381,9 @@ def run_retrieve(
                 mode=mode,
                 exchange=exchange,
                 quote=quote,
-                start_ms=start_ms,
+                start_ms=start_ms_local,
                 end_ms=end_ms,
             )
-            # Build output path under data/<SYM>/
-            out_dir = out_root / sym
-            _ensure_dir(out_dir)
-            out_file = out_dir / _output_filename(ds_key)
 
             def fetch_all(path: str) -> List[Mapping[str, Any]]:
                 if dry_run:
