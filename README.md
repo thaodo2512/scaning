@@ -30,6 +30,11 @@
 - Outputs under `artifacts/<RUN_ID>/` by default (or `--artifacts-root` override):
   - `alerts/<SYM>.csv`, `scores/<SYM>.csv`, `metrics/metrics.json`.
 
+## Report (Item 5)
+- Generate self-contained HTML per symbol (Lightweight Charts):
+  - `PYTHONPATH=src python -m cryptostorm report configs/example.yaml --data data --features features --out reports`
+- Opens offline; to inline the charting lib without CDN, drop `lightweight-charts.standalone.production.js` at `vendor/` or `reports/vendor/`.
+
 ## Outputs & Quick Checks
 - Files per symbol in `data/<SYM>/`:
   - `futures_ohlcv_5m.jsonl`, `spot_ohlcv_5m.jsonl`, `funding_8h_ohlc.jsonl`, `oi_5m_ohlc.jsonl`, `taker_futures_5m.jsonl`, `liquidation_5m.jsonl`, `orderbook_futures_5m.jsonl` (plus optional datasets if enabled).

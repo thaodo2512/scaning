@@ -68,7 +68,10 @@ fi
 echo "[3/4] Building features -> $FEATURES_DIR"
 python -m cryptostorm feature "$CONFIG" --data "$DATA_DIR" --out "$FEATURES_DIR"
 
-echo "[4/4] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
+echo "[4/5] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
 python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE"
+
+echo "[5/5] Generating per-symbol HTML reports -> reports/"
+python -m cryptostorm report "$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --out reports
 
 echo "E2E pipeline completed successfully."

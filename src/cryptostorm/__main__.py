@@ -10,6 +10,7 @@ from .retrieve.coinglass import run_retrieve
 from .audit import main as audit_main
 from .feature.engine import main as feature_main
 from .backtest.engine import main as backtest_main
+from .report.engine import main as report_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -40,6 +41,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_bt.add_argument("config", type=str)
     p_bt.add_argument("--features", type=str, default="features")
     p_bt.add_argument("--artifacts-root", type=str)
+
+    p_rep = sub.add_parser("report", help="Generate per-symbol HTML reports")
+    p_rep.add_argument("config", type=str)
+    p_rep.add_argument("--data", type=str, default="data")
+    p_rep.add_argument("--features", type=str, default="features")
+    p_rep.add_argument("--artifacts", type=str)
+    p_rep.add_argument("--out", type=str, default="reports")
 
     args = parser.parse_args(argv)
 
@@ -93,6 +101,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.artifacts_root:
             argv += ["--artifacts-root", args.artifacts_root]
         return backtest_main(argv)
+
+    if args.cmd == "report":
+        argv = [args.config, "--data", args.data, "--features", args.features, "--out", args.out]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        return report_main(argv)
 
     return 0
 
