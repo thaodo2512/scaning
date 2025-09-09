@@ -12,6 +12,8 @@ acquisition:
   coinglass:
     base_url: https://open-api-v4.coinglass.com
     api_key_env: COINGLASS_API_KEY
+    # Optional: read from file instead of env var
+    # api_key_file: ./secrets/coinglass_api_key.txt
     exchange: binance
     quote: USDT
     prefer_aggregated: true
@@ -81,4 +83,3 @@ conventions:
   symbol_to_coin: { BTCUSDT: BTC, ETHUSDT: ETH }
   units: { taker_volume: base, liquidation_notional: USDT, open_interest: contracts }
   orderbook: { max_snapshot_age_s: 60 }
-

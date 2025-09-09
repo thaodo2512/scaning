@@ -1,0 +1,122 @@
+acquisition:
+  coinglass:
+    api_key_env: COINGLASS_API_KEY
+    api_key_file: secrets/coinglass_api_key.txt
+    base_url: https://open-api-v4.coinglass.com
+    exchange: binance
+    intervals:
+      funding_5m: 5m
+      funding_8h: 8h
+      futures_ohlcv: 5m
+      liquidation: 5m
+      oi_ohlc: 5m
+      orderbook_range_bp: 10
+      orderbook_sample: last_of_5m
+      spot_ohlcv: 5m
+      taker_spot_5m: 5m
+      taker_volume: 5m
+    paging:
+      backoff_initial_s: 1
+      backoff_max_s: 64
+      page_limit: 500
+    per_series_mode:
+      etf: aggregated
+      funding_5m: exchange
+      funding_8h: exchange
+      futures_ohlcv: exchange
+      liquidation: aggregated
+      ls_ratio: aggregated
+      oi_5m: aggregated
+      onchain: aggregated
+      orderbook: exchange
+      spot_ohlcv: exchange
+      taker_futures: exchange
+      taker_spot: exchange
+    prefer_aggregated: true
+    quote: USDT
+  days: 30
+  enable:
+    etf_flows_daily: false
+    funding_pred_5m: false
+    onchain_balances_daily: false
+    orderbook_spot_5m: false
+    spot_ohlcv_5m: true
+    taker_spot_5m: false
+  mode: coinglass_only
+alerts:
+  cooldown_bars: 12
+  persist_k_5m: 2
+  storm_confirm_k_5m:
+    A: 1
+    default: 2
+conventions:
+  orderbook:
+    max_snapshot_age_s: 60
+  symbol_to_coin:
+    BTCUSDT: BTC
+    ETHUSDT: ETH
+  units:
+    liquidation_notional: USDT
+    open_interest: contracts
+    taker_volume: base
+features:
+  funding:
+    settlement_hours_utc:
+    - 0
+    - 8
+    - 16
+  qc:
+    drop_day_if_missing_minute_ratio_gt: 0.01
+labels:
+  horizons_min:
+  - 30
+  - 60
+  - 90
+  - 120
+  pct_move: 0.05
+model:
+  algo: isolation_forest
+  iforest_defaults:
+    bootstrap: false
+    contamination: auto
+    max_features: 0.7
+    n_jobs: -1
+  min_feature_coverage: 0.95
+  per_tier_overrides:
+    A:
+      contamination: auto
+      max_features: 0.7
+      max_samples: 512
+      n_estimators: 300
+    B:
+      contamination: auto
+      max_features: 0.7
+      max_samples: 1024
+      n_estimators: 500
+    C:
+      contamination: auto
+      max_features: 0.6
+      max_samples: 1024
+      n_estimators: 500
+  random_state: 42
+  retrain_every_hours: 8
+  scaler:
+    clip_quantiles:
+    - 0.01
+    - 0.99
+    type: robust
+  threshold_q: 0.97
+  train_window_days: 30
+run:
+  artifacts_root: ./artifacts
+  run_id: 20250101-000000
+universe:
+  symbols:
+  - BTCUSDT
+  - ETHUSDT
+  tiering:
+    A:
+    - BTCUSDT
+    - ETHUSDT
+    B: 20
+    C: 30

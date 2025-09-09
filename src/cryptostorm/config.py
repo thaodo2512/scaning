@@ -26,7 +26,9 @@ class EffectiveConfig:
     run_id: str
     artifacts_root: Path
     symbols: List[str]
+    symbol_to_coin: Dict[str, str]
     api_key_env: str
+    api_key_file: Optional[Path]
     api_key_present: bool
     orderbook_range_bp: Optional[int]
     max_ob_age_s: Optional[int]
@@ -126,12 +128,17 @@ def _compute_datasets(
         ("taker_futures_5m", "taker_futures", "core"),
         ("taker_spot_5m", "taker_spot", "optional"),
         ("liquidation_5m", "liquidation", "core"),
-        ("orderbook_sample", "orderbook", "core"),
+        ("orderbook_futures_5m", "orderbook", "core"),
+        ("orderbook_spot_5m", "orderbook", "optional"),
     ]
 
     datasets: Dict[str, DatasetConfig] = {}
     for interval_key, mode_key, tier in dataset_keys:
-        interval = intervals.get(interval_key)
+        # Special handling: both orderbook datasets share the same interval key
+        if interval_key in {"orderbook_futures_5m", "orderbook_spot_5m"}:
+            interval = intervals.get("orderbook_sample")
+        else:
+            interval = intervals.get(interval_key)
         mode = modes.get(mode_key)
         # enabled: if enable flag present, respect it; otherwise default True for core, False for optional
         default_enabled = tier == "core"
@@ -143,6 +150,8 @@ def _compute_datasets(
             enabled = _bool_get(enable, "spot_ohlcv_5m", enabled)
         if interval_key == "taker_spot_5m":
             enabled = _bool_get(enable, "taker_spot_5m", enabled)
+        if interval_key == "orderbook_spot_5m":
+            enabled = _bool_get(enable, "orderbook_spot_5m", enabled)
 
         datasets[interval_key] = DatasetConfig(
             name=interval_key, interval=str(interval) if interval is not None else None, mode=str(mode) if mode is not None else None, enabled=enabled
@@ -201,18 +210,31 @@ def validate_config(
 
     coinglass = dict(acquisition.get("coinglass", {}))
     api_key_env = coinglass.get("api_key_env", "COINGLASS_API_KEY")
+    api_key_file_raw = coinglass.get("api_key_file")
+    api_key_file: Optional[Path] = None
+    if isinstance(api_key_file_raw, str) and api_key_file_raw.strip():
+        api_key_file = Path(api_key_file_raw)
     if not isinstance(api_key_env, str) or not api_key_env:
         errors.append("acquisition.coinglass.api_key_env must be a non-empty string")
-    api_key_present = os.getenv(api_key_env) is not None
+    env_present = os.getenv(api_key_env) is not None
+    file_present = False
+    if api_key_file is not None and api_key_file.exists():
+        try:
+            content = api_key_file.read_text(encoding="utf-8").strip()
+            file_present = bool(content)
+        except Exception:
+            file_present = False
+    api_key_present = env_present or file_present
     if require_env and not api_key_present:
-        errors.append(
-            f"Environment variable {api_key_env} is not set; export your Coinglass API key."
+        msg = (
+            f"No API key found: set env {api_key_env} or provide acquisition.coinglass.api_key_file"
         )
+        errors.append(msg)
 
     # Intervals & modes
     intervals = _norm_intervals(dict(coinglass.get("intervals", {})))
     modes = _norm_per_series_mode(dict(coinglass.get("per_series_mode", {})))
-    enable = dict(acquisition.get("enable", {}))
+    enable = dict(acquisition.get("enable", {}) or cfg.get("enable", {}))
 
     # Orderbook params
     orderbook_range_bp = intervals.get("orderbook_range_bp")
@@ -257,12 +279,14 @@ def validate_config(
         artifacts_root=artifacts_path,
         symbols=[str(s) for s in symbols],
         api_key_env=api_key_env,
+        api_key_file=api_key_file,
         api_key_present=api_key_present,
         orderbook_range_bp=int(orderbook_range_bp) if isinstance(orderbook_range_bp, int) else None,
         max_ob_age_s=int(conventions.get("orderbook", {}).get("max_snapshot_age_s", 60))
         if isinstance(conventions.get("orderbook"), Mapping)
         else None,
         days=int(days),
+        symbol_to_coin={str(k): str(v) for k, v in symbol_to_coin.items()},
         datasets=datasets,
     )
 
@@ -324,4 +348,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
