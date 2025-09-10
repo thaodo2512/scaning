@@ -11,6 +11,7 @@ from .audit import main as audit_main
 from .feature.engine import main as feature_main
 from .backtest.engine import main as backtest_main
 from .report.engine import main as report_main
+from .report.price_alert import main as price_alert_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -50,6 +51,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rep.add_argument("--features", type=str, default="features")
     p_rep.add_argument("--artifacts", type=str)
     p_rep.add_argument("--out", type=str, default="reports")
+
+    p_rep2 = sub.add_parser("report-price", help="Generate price+alerts Plotly reports (no lightweight-charts)")
+    p_rep2.add_argument("config", type=str)
+    p_rep2.add_argument("--data", type=str, default="data")
+    p_rep2.add_argument("--artifacts", type=str)
+    p_rep2.add_argument("--out", type=str, default="reports")
 
     args = parser.parse_args(argv)
 
@@ -113,6 +120,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
         return report_main(argv)
+    if args.cmd == "report-price":
+        argv = [args.config, "--data", args.data, "--out", args.out]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        return price_alert_main(argv)
 
     return 0
 
