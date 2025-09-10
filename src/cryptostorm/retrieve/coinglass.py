@@ -292,7 +292,19 @@ def _page_iter(base_url: str, headers: Mapping[str, str], path: str, params: Dic
         page += 1
 
 
-def _build_params(eff: EffectiveConfig, ds_key: str, symbol: str, *, interval: Optional[str], mode: Optional[str], exchange: str, quote: str, start_ms: int, end_ms: int) -> Tuple[Dict[str, Any], bool]:
+def _build_params(
+    eff: EffectiveConfig,
+    ds_key: str,
+    symbol: str,
+    *,
+    interval: Optional[str],
+    mode: Optional[str],
+    exchange: str,
+    quote: str,
+    start_ms: int,
+    end_ms: int,
+    orderbook_time_enum: Optional[str] = None,
+) -> Tuple[Dict[str, Any], bool]:
     # Return params and a flag whether this is aggregated-level query
     aggregated = (mode or "").lower() == "aggregated"
     params: Dict[str, Any] = {
@@ -314,7 +326,39 @@ def _build_params(eff: EffectiveConfig, ds_key: str, symbol: str, *, interval: O
             params.update({"exchange_list": exchange})
     else:
         params.update({"symbol": symbol, "exchange": exchange})
+    # Orderbook requires timeEnum on v4
+    if ds_key in {"orderbook_futures_5m", "orderbook_spot_5m"}:
+        if orderbook_time_enum:
+            params["timeEnum"] = orderbook_time_enum
     return params, aggregated
+
+
+def _time_slices(start_ms: int, end_ms: int, slice_ms: int) -> Iterable[Tuple[int, int]]:
+    cur = start_ms
+    while cur < end_ms:
+        nxt = min(end_ms, cur + slice_ms)
+        yield cur, nxt
+        cur = nxt
+
+
+def _fetch_time_sliced(
+    *,
+    base_url: str,
+    headers: Mapping[str, str],
+    path: str,
+    params: Dict[str, Any],
+    start_ms: int,
+    end_ms: int,
+    slice_ms: int,
+) -> List[Mapping[str, Any]]:
+    items: List[Mapping[str, Any]] = []
+    for s, e in _time_slices(start_ms, end_ms, slice_ms):
+        local = {**params, "startTime": s, "endTime": e}
+        resp = _http_get(base_url, path, local, headers, backoff_initial=1.0, backoff_max=8.0)
+        got = _extract_items(resp)
+        LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
+        items.extend(got)
+    return items
 
 
 def _output_filename(ds_key: str, exchange_market: str = "futures") -> str:
@@ -427,6 +471,9 @@ def run_retrieve(
     out_root: Path,
     api_key: Optional[str] = None,
     dry_run: bool = False,
+    slice_days: int = 0,
+    force_v3: Optional[List[str]] = None,
+    orderbook_time_enum: Optional[str] = None,
 ) -> None:
     # Resolve API key if not provided (robust fallback)
     if not api_key and not dry_run:
@@ -495,28 +542,50 @@ def run_retrieve(
                 quote=quote,
                 start_ms=start_ms_local,
                 end_ms=end_ms,
+                orderbook_time_enum=orderbook_time_enum,
             )
 
             def fetch_all(path: str) -> List[Mapping[str, Any]]:
                 if dry_run:
                     LOG.info("DRY-RUN: GET %s params=%s", path, params)
                     return []
-                return list(
-                    _page_iter(
-                        base_url,
-                        headers,
-                        path,
-                        params,
-                        page_limit=page_limit,
-                        backoff_initial=backoff_initial,
-                        backoff_max=backoff_max,
+                # Use time-slicing for v4 when configured; otherwise use paging
+                if slice_days and path.startswith("/api/") and "open-interest/ohlc-history" not in path and "price/ohlc-history" not in path:
+                    slice_ms = slice_days * 24 * 60 * 60 * 1000
+                    return _fetch_time_sliced(
+                        base_url=base_url,
+                        headers=headers,
+                        path=path,
+                        params=params,
+                        start_ms=params["startTime"],
+                        end_ms=params["endTime"],
+                        slice_ms=slice_ms,
                     )
-                )
+                else:
+                    return list(
+                        _page_iter(
+                            base_url,
+                            headers,
+                            path,
+                            params,
+                            page_limit=page_limit,
+                            backoff_initial=backoff_initial,
+                            backoff_max=backoff_max,
+                        )
+                    )
 
             # Prefer aggregated/exchange as per mode, with fallback when specified
+            # Allow forcing v3 for specific datasets
             used_path = preferred
+            if force_v3 and ds_key in set(force_v3):
+                if ds_key == "futures_ohlcv_5m":
+                    used_path = "/api/price/ohlc-history"
+                elif ds_key == "oi_5m_ohlc":
+                    used_path = "/api/futures/openInterest/ohlc-history"
+                elif ds_key == "liquidation_5m":
+                    used_path = "/api/futures/liquidation/history"
             try:
-                items = fetch_all(preferred)
+                items = fetch_all(used_path)
                 if not items and fallback:
                     # Log additional context for debugging
                     _params_preview = {

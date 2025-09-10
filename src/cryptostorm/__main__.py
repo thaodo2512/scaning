@@ -26,6 +26,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_ret.add_argument("--out", type=str, default="data")
     p_ret.add_argument("--dry-run", action="store_true")
     p_ret.add_argument("--log-level", type=str, default="INFO")
+    p_ret.add_argument("--slice-days", type=int, default=None)
 
     p_aud = sub.add_parser("audit", help="Audit data coverage for the 30d window")
     p_aud.add_argument("config", type=str)
@@ -36,6 +37,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_feat.add_argument("config", type=str)
     p_feat.add_argument("--data", type=str, default="data")
     p_feat.add_argument("--out", type=str, default="features")
+    p_feat.add_argument("--log-level", type=str, default="INFO")
 
     p_bt = sub.add_parser("backtest", help="Run walk-forward IsolationForest backtest")
     p_bt.add_argument("config", type=str)
@@ -87,6 +89,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             backoff_max=backoff_max,
             out_root=out_root,
             dry_run=args.dry_run,
+            api_key=None,
+            slice_days=(args.slice_days if args.slice_days is not None else int(cg.get("slice_days", 0) or 0)),
+            force_v3=list(cg.get("force_v3", []) or []),
+            orderbook_time_enum=cg.get("orderbook_time_enum") or ("LAST_OF_5M" if (cg.get("intervals", {}) or {}).get("orderbook_sample") == "last_of_5m" else None),
         )
         return 0
 
@@ -94,7 +100,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return audit_main([args.config, "--data", args.data, "--min-ratio", str(args.min_ratio)])
 
     if args.cmd == "feature":
-        return feature_main([args.config, "--data", args.data, "--out", args.out])
+        return feature_main([args.config, "--data", args.data, "--out", args.out, "--log-level", args.log_level])
 
     if args.cmd == "backtest":
         argv = [args.config, "--features", args.features]

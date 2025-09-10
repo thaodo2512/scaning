@@ -6,6 +6,7 @@ import json
 import math
 import time
 from dataclasses import dataclass
+import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 
@@ -21,6 +22,15 @@ def _align_to_5m_close(ms: int) -> int:
     # Align to previous multiple of 5 minutes
     step = 5 * 60 * 1000
     return ms - (ms % step)
+
+
+def _ms_to_iso(ms: int) -> str:
+    try:
+        import datetime as _dt
+
+        return _dt.datetime.utcfromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M:%SZ")
+    except Exception:
+        return str(ms)
 
 
 def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
@@ -138,6 +148,30 @@ def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
     return spread_bps
 
 
+def _series_stats(name: str, series_keys: Iterable[int]) -> str:
+    xs = list(series_keys)
+    if not xs:
+        return f"{name}: count=0"
+    mn, mx = min(xs), max(xs)
+    return f"{name}: count={len(xs)} range=[{_ms_to_iso(mn)} .. {_ms_to_iso(mx)}]"
+
+
+def _alignment_stats(name: str, series_keys: Iterable[int], step_ms: int = 5 * 60 * 1000) -> str:
+    try:
+        from collections import Counter
+
+        xs = list(series_keys)
+        if not xs:
+            return f"{name}: aligned=0% (no data)"
+        rema = [int(k) % int(step_ms) for k in xs]
+        c = Counter(rema)
+        most_common_rema, freq = c.most_common(1)[0]
+        pct = 100.0 * freq / len(xs)
+        return f"{name}: most_remainder={most_common_rema}ms aligned~{pct:.1f}%"
+    except Exception:
+        return f"{name}: alignment=n/a"
+
+
 def build_features(
     eff: EffectiveConfig,
     *,
@@ -145,17 +179,30 @@ def build_features(
     out_root: Path,
     now_ms: Optional[int] = None,
 ) -> None:
+    LOG = logging.getLogger("cryptostorm.feature")
     now = now_ms if isinstance(now_ms, int) else _utc_now_ms()
     grid = _make_grid(now, eff.days)
+    LOG.info("grid: %d bars from %s to %s", len(grid), _ms_to_iso(grid[0] if grid else now), _ms_to_iso(grid[-1] if grid else now))
     for sym in eff.symbols:
         sym_dir = data_root / sym
         # load inputs
         fnd = _funding_series(sym_dir)
         ohlcv = _ohlcv_series(sym_dir)
         oi = _oi_series(sym_dir)
+        LOG.info("%s inputs: %s | %s | %s", sym, _series_stats("ohlcv", ohlcv.keys()), _series_stats("funding_8h", fnd.keys()), _series_stats("oi", oi.keys()))
+        LOG.debug(
+            "%s input alignment: %s | %s | %s",
+            sym,
+            _alignment_stats("ohlcv", ohlcv.keys()),
+            _alignment_stats("funding_8h", fnd.keys(), 8 * 60 * 60 * 1000),
+            _alignment_stats("oi", oi.keys()),
+        )
 
         rows: List[Dict[str, Any]] = []
         last_funding: Optional[float] = None
+        missing_ohlcv = 0
+        missing_oi = 0
+        ob_stale = 0
         for ts in grid:
             row: Dict[str, Any] = {
                 "ts": ts,
@@ -175,6 +222,7 @@ def build_features(
                     row[k] = v
             else:
                 row["data_ok"] = False
+                missing_ohlcv += 1
 
             # funding ffill only
             if ts in fnd:
@@ -185,12 +233,15 @@ def build_features(
             # oi as snapshot (no ffill)
             if ts in oi:
                 row["oi_now"] = oi[ts]
+            else:
+                missing_oi += 1
 
             # order book spread; NaN if stale
             max_age = eff.max_ob_age_s or 60
             spread = _orderbook_spread_bps(sym_dir, ts, max_age)
             if math.isnan(spread):
                 row["data_ok"] = False
+                ob_stale += 1
             row["spread_bps"] = spread
 
             rows.append(row)
@@ -218,14 +269,59 @@ def build_features(
             for r in rows:
                 w.writerow(r)
 
+        # Coverage summary
+        def cov(key: str) -> float:
+            import math as _math
+
+            vals = [r.get(key) for r in rows]
+            ok = sum(1 for v in vals if isinstance(v, (int, float)) and not _math.isnan(v))
+            return ok / len(rows) if rows else 0.0
+
+        LOG.info(
+            "%s coverage: ohlcv=%.3f funding=%.3f oi=%.3f ob_spread=%.3f data_ok=%.3f out=%s",
+            sym,
+            cov("close"),
+            cov("funding_now"),
+            cov("oi_now"),
+            cov("spread_bps"),
+            sum(1 for r in rows if r.get("data_ok") is True) / len(rows) if rows else 0.0,
+            out_fp,
+        )
+        LOG.info(
+            "%s missing bars: ohlcv=%d oi=%d ob_stale=%d of %d",
+            sym,
+            missing_ohlcv,
+            missing_oi,
+            ob_stale,
+            len(rows),
+        )
+        # If debugging, print a few example rows
+        if logging.getLogger("cryptostorm.feature").isEnabledFor(logging.DEBUG):
+            for label, idx in (("first", 0), ("second", 1), ("last", len(rows) - 1)):
+                if 0 <= idx < len(rows):
+                    r = rows[idx]
+                    LOG.debug(
+                        "%s row %s ts=%s close=%s funding=%s oi=%s spread_bps=%s data_ok=%s",
+                        sym,
+                        label,
+                        _ms_to_iso(int(r["ts"])),
+                        r.get("close"),
+                        r.get("funding_now"),
+                        r.get("oi_now"),
+                        r.get("spread_bps"),
+                        r.get("data_ok"),
+                    )
+
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm feature engineering")
     parser.add_argument("config", type=str)
     parser.add_argument("--data", type=str, default="data", help="Input data root")
     parser.add_argument("--out", type=str, default="features", help="Output features root")
+    parser.add_argument("--log-level", type=str, default="INFO")
     args = parser.parse_args(argv)
 
+    logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = load_config(args.config)
     eff, warns, errs = validate_config(cfg, require_env=False)
     if errs:
@@ -238,4 +334,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

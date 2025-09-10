@@ -45,6 +45,17 @@ def _interval_ms(name: str, interval_value: Optional[str]) -> Optional[int]:
     return None
 
 
+def _ms_to_iso(ms: Optional[int]) -> str:
+    if ms is None:
+        return "-"
+    try:
+        import datetime as _dt
+
+        return _dt.datetime.utcfromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M:%SZ")
+    except Exception:
+        return str(ms)
+
+
 def _read_ts_in_window(fp: Path, start_ms: int, end_ms: int) -> List[int]:
     if not fp.exists():
         return []
@@ -130,7 +141,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Print concise summary
     for r in rows:
         print(
-            f"{r.symbol} {r.dataset}: observed={r.observed} expected={r.expected} ratio={r.ratio:.3f} file={r.file}"
+            f"{r.symbol} {r.dataset}: observed={r.observed} expected={r.expected} ratio={r.ratio:.3f} first={_ms_to_iso(r.first_ts)} last={_ms_to_iso(r.last_ts)} file={r.file}"
         )
     if failures:
         print(f"FAIL: {len(failures)} dataset(s) below ratio {args.min_ratio}")
@@ -141,4 +152,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
