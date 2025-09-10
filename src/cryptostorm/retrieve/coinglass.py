@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
+import math
 
 from ..config import EffectiveConfig, load_config, validate_config
 
@@ -41,6 +42,15 @@ def _to_ms(ts: Any) -> Optional[int]:
     return None
 
 
+def _ms_to_iso(ms: int) -> str:
+    try:
+        import datetime as _dt
+
+        return _dt.datetime.utcfromtimestamp(int(ms) / 1000).strftime("%Y-%m-%d %H:%M:%SZ")
+    except Exception:
+        return str(ms)
+
+
 def _infer_ts_ms(item: Mapping[str, Any]) -> Optional[int]:
     for k in ("ts", "timestamp", "t", "time", "closeTime", "endTime"):
         if k in item:
@@ -66,8 +76,8 @@ class Endpoint:
 ENDPOINTS: Dict[str, Endpoint] = {
     "futures_ohlcv_5m": Endpoint(
         dataset="futures_ohlcv_5m",
-        preferred="/api/price/ohlc-history",
-        fallback=None,
+        preferred="/api/futures/price/history",
+        fallback="/api/price/ohlc-history",
         level="symbol",
     ),
     "spot_ohlcv_5m": Endpoint(
@@ -90,13 +100,13 @@ ENDPOINTS: Dict[str, Endpoint] = {
     ),
     "oi_5m_ohlc": Endpoint(
         dataset="oi_5m_ohlc",
-        preferred="/api/futures/openInterest/ohlc-aggregated-history",
+        preferred="/api/futures/open-interest/aggregated-history",
         fallback="/api/futures/openInterest/ohlc-history",
         level="coin",
     ),
     "taker_futures_5m": Endpoint(
         dataset="taker_futures_5m",
-        preferred="/api/futures/taker-buy-sell-volume/history",
+        preferred="/api/futures/v2/taker-buy-sell-volume/history",
         fallback="/api/futures/aggregated-taker-buy-sell-volume/history",
         level="symbol",
     ),
@@ -168,33 +178,116 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
 
 
 def _extract_items(resp: Mapping[str, Any]) -> List[Mapping[str, Any]]:
-    # Try common envelope shapes
+    """Extract a list of records from various response envelope shapes.
+
+    Supports:
+    - { data: [ ... ] }
+    - { list: [ ... ] }
+    - { data: { list: [ ... ] } }
+    - { result: { rows: [ ... ] } }
+    - Any nested dict that contains a list of mappings.
+    """
+    # 1) Direct common keys at top-level
     for key in ("data", "list", "rows", "result", "items"):
-        if key in resp and isinstance(resp[key], list):
-            return list(resp[key])
-    if isinstance(resp, list):  # rarely top-level array
+        v = resp.get(key)
+        if isinstance(v, list):
+            return list(v)
+        if isinstance(v, Mapping):
+            # 2) Nested common keys
+            for nk in ("data", "list", "rows", "items", "result"):
+                nv = v.get(nk) if hasattr(v, "get") else None
+                if isinstance(nv, list):
+                    return list(nv)
+    # 3) Top-level direct list
+    if isinstance(resp, list):
         return list(resp)
-    # If response has pagination fields and nested records
-    for key, v in resp.items():
+    # 4) Fallback: scan nested values shallowly
+    for _, v in resp.items():
         if isinstance(v, list) and v and isinstance(v[0], Mapping):
             return list(v)
+        if isinstance(v, Mapping):
+            for nv in v.values():
+                if isinstance(nv, list) and nv and isinstance(nv[0], Mapping):
+                    return list(nv)
     return []
+
+
+def _interval_to_ms(interval: Optional[str]) -> Optional[int]:
+    if not isinstance(interval, str):
+        return None
+    s = interval.lower().strip()
+    if s.endswith("ms") and s[:-2].isdigit():
+        return int(s[:-2])
+    if s.endswith("s") and s[:-1].isdigit():
+        return int(s[:-1]) * 1000
+    if s.endswith("m") and s[:-1].isdigit():
+        return int(s[:-1]) * 60 * 1000
+    if s.endswith("h") and s[:-1].isdigit():
+        return int(s[:-1]) * 60 * 60 * 1000
+    if s.endswith("d") and s[:-1].isdigit():
+        return int(s[:-1]) * 24 * 60 * 60 * 1000
+    return None
 
 
 def _page_iter(base_url: str, headers: Mapping[str, str], path: str, params: Dict[str, Any], *, page_limit: int, backoff_initial: float, backoff_max: float) -> Iterable[Mapping[str, Any]]:
     page = 1
     total = 0
+    # Estimate an upper bound for pages to avoid infinite loops
+    start_ms = params.get("startTime")
+    end_ms = params.get("endTime")
+    interval_ms = _interval_to_ms(params.get("interval")) or 5 * 60 * 1000
+    expected = 0
+    if isinstance(start_ms, (int, float)) and isinstance(end_ms, (int, float)) and interval_ms > 0:
+        expected = max(0, int((int(end_ms) - int(start_ms)) // interval_ms))
+    max_pages = max(5, (math.ceil(expected / page_limit) if page_limit > 0 else 0) + 5)
+    seen_ts: set = set()
+    stalled_pages = 0
     while True:
         page_params = {**params, "page": page, "pageSize": page_limit, "limit": page_limit}
         resp = _http_get(base_url, path, page_params, headers, backoff_initial=backoff_initial, backoff_max=backoff_max)
         items = _extract_items(resp)
         if not items:
+            if page == 1:
+                try:
+                    keys = ",".join(list(resp.keys())[:6]) if isinstance(resp, Mapping) else str(type(resp))
+                except Exception:
+                    keys = "<unavailable>"
+                # Prepare a compact snippet of the raw response for debugging
+                try:
+                    raw_snippet = json.dumps(resp, ensure_ascii=False) if isinstance(resp, (dict, list)) else str(resp)
+                except Exception:
+                    raw_snippet = str(type(resp))
+                max_len = 2000
+                if len(raw_snippet) > max_len:
+                    raw_snippet = raw_snippet[:max_len] + " … (truncated)"
+                logging.getLogger("cryptostorm.retrieve").info(
+                    "empty page on preferred call: path=%s keys=%s resp=%s",
+                    path,
+                    keys,
+                    raw_snippet,
+                )
             break
+        new_in_page = 0
         for it in items:
+            # Try to detect progress using timestamp keys
+            ts_ms = _infer_ts_ms(it)
+            if ts_ms is not None and ts_ms not in seen_ts:
+                seen_ts.add(ts_ms)
+                new_in_page += 1
             yield it
         total += len(items)
-        LOG.debug("page %s: got %s items (total=%s)", page, len(items), total)
+        LOG.debug("page %s: got %s items (new_ts=%s, total=%s)", page, len(items), new_in_page, total)
+        if new_in_page == 0:
+            stalled_pages += 1
+        else:
+            stalled_pages = 0
         if len(items) < page_limit:
+            break
+        if page >= max_pages:
+            LOG.warning("stopping pagination: page=%s exceeds max_pages=%s (expected=%s, limit=%s)", page, max_pages, expected, page_limit)
+            break
+        if stalled_pages >= 2:
+            LOG.warning("stopping pagination due to no progress (stalled_pages=%s) path=%s", stalled_pages, path)
             break
         page += 1
 
@@ -209,11 +302,16 @@ def _build_params(eff: EffectiveConfig, ds_key: str, symbol: str, *, interval: O
         "quote": quote,
     }
     if aggregated:
+        # Some v4 aggregated endpoints require 'symbol' (coin code) rather than 'coin'.
         coin = eff.symbol_to_coin.get(symbol)
         if not coin:
             # naive fallback: strip quote suffix
             coin = symbol[:-len(quote)] if symbol.endswith(quote) else symbol
-        params.update({"coin": coin})
+        # Prefer 'symbol' for aggregated endpoints (e.g., open-interest/aggregated-history)
+        params.update({"symbol": coin})
+        # Some aggregated endpoints (e.g., liquidation aggregated) require 'exchange_list'
+        if ds_key == "liquidation_5m":
+            params.update({"exchange_list": exchange})
     else:
         params.update({"symbol": symbol, "exchange": exchange})
     return params, aggregated
@@ -330,6 +428,20 @@ def run_retrieve(
     api_key: Optional[str] = None,
     dry_run: bool = False,
 ) -> None:
+    # Resolve API key if not provided (robust fallback)
+    if not api_key and not dry_run:
+        # Try file from effective config
+        try:
+            if getattr(eff, "api_key_file", None):
+                p = Path(eff.api_key_file)  # type: ignore[arg-type]
+                if p.exists():
+                    api_key = p.read_text(encoding="utf-8").strip() or None
+        except Exception:
+            api_key = None
+        # Try environment
+        if not api_key:
+            api_key = os.getenv(eff.api_key_env)
+
     # Compute global time window
     end_ms = _utc_now_ms()
     base_start_ms = end_ms - eff.days * 24 * 60 * 60 * 1000
@@ -406,7 +518,25 @@ def run_retrieve(
             try:
                 items = fetch_all(preferred)
                 if not items and fallback:
-                    LOG.info("fallback to %s for %s %s", fallback, ds_key, sym)
+                    # Log additional context for debugging
+                    _params_preview = {
+                        k: params.get(k)
+                        for k in ("symbol", "coin", "exchange", "interval")
+                        if params.get(k) is not None
+                    }
+                    _params_preview.update(
+                        {
+                            "start": _ms_to_iso(params.get("startTime")),
+                            "end": _ms_to_iso(params.get("endTime")),
+                        }
+                    )
+                    LOG.info(
+                        "fallback to %s for %s %s (preferred returned 0 items) params=%s",
+                        fallback,
+                        ds_key,
+                        sym,
+                        _params_preview,
+                    )
                     used_path = fallback
                     # Adjust params for fallback (ensure symbol/exchange present)
                     if aggregated and ep.level == "coin":

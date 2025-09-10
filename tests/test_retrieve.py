@@ -93,8 +93,8 @@ class TestRetrieve(unittest.TestCase):
                 # record the call
                 calls.append({"path": path, "params": dict(params)})
                 # Return empty for aggregated OI to force fallback
-                if path.endswith("/api/futures/openInterest/ohlc-aggregated-history"):
-                    if params.get("coin") in {"BTC", "ETH"}:
+                if path.endswith("/api/futures/open-interest/aggregated-history"):
+                    if params.get("symbol") in {"BTC", "ETH"}:
                         return iter(())
                 # Return data for fallback OI
                 if path.endswith("/api/futures/openInterest/ohlc-history"):
@@ -168,10 +168,10 @@ class TestRetrieve(unittest.TestCase):
                 }
                 self.assertEqual(before_counts, after_counts)
 
-                # Confirm aggregated call used mapped coins
-                agg_calls = [c for c in calls if c["path"].endswith("/api/futures/openInterest/ohlc-aggregated-history")]
-                coins = sorted({c["params"].get("coin") for c in agg_calls})
-                self.assertEqual(coins, ["BTC", "ETH"])
+                # Confirm aggregated call used mapped coins via 'symbol'
+                agg_calls = [c for c in calls if c["path"].endswith("/api/futures/open-interest/aggregated-history")]
+                syms = sorted({c["params"].get("symbol") for c in agg_calls})
+                self.assertEqual(syms, ["BTC", "ETH"])
 
     def test_incremental_start_time_uses_last_saved_ts_plus_one(self):
         with tempfile.TemporaryDirectory() as td:
@@ -190,7 +190,7 @@ class TestRetrieve(unittest.TestCase):
                     return iter([{ "ts": 1700000005000 }])
                 if "/orderbook/ask-bids-history" in path:
                     return iter([{ "ts": 1700000000000 }])
-                if path.endswith("/api/futures/openInterest/ohlc-aggregated-history"):
+                if path.endswith("/api/futures/open-interest/aggregated-history"):
                     return iter(())
                 return iter(())
 

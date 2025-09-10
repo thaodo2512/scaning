@@ -89,12 +89,12 @@ class TestRetrieveEndpoints(unittest.TestCase):
 
             # Expected dataset files and preferred sources
             expected = {
-                "futures_ohlcv_5m.jsonl": "/api/price/ohlc-history",
+                "futures_ohlcv_5m.jsonl": "/api/futures/price/history",
                 "spot_ohlcv_5m.jsonl": "/api/spot/price/history",
                 "funding_8h_ohlc.jsonl": "/api/futures/funding-rate/history",
                 "funding_pred_5m_ohlc.jsonl": "/api/futures/funding-rate/history",
-                "oi_5m_ohlc.jsonl": "/api/futures/openInterest/ohlc-aggregated-history",
-                "taker_futures_5m.jsonl": "/api/futures/taker-buy-sell-volume/history",
+                "oi_5m_ohlc.jsonl": "/api/futures/open-interest/aggregated-history",
+                "taker_futures_5m.jsonl": "/api/futures/v2/taker-buy-sell-volume/history",
                 "taker_spot_5m.jsonl": "/api/spot/taker-buy-sell-volume/history",
                 "liquidation_5m.jsonl": "/api/futures/liquidation/aggregated-history",
                 "orderbook_futures_5m.jsonl": "/api/futures/orderbook/ask-bids-history",
@@ -117,8 +117,8 @@ class TestRetrieveEndpoints(unittest.TestCase):
             def page_iter(base_url, headers, path, params, page_limit, backoff_initial, backoff_max):
                 # Return empty for preferred paths that have fallbacks; otherwise return data
                 preferred_to_empty = {
-                    "/api/futures/openInterest/ohlc-aggregated-history",
-                    "/api/futures/taker-buy-sell-volume/history",
+                    "/api/futures/open-interest/aggregated-history",
+                    "/api/futures/v2/taker-buy-sell-volume/history",
                     "/api/futures/liquidation/aggregated-history",
                     "/api/futures/funding-rate/history",
                 }
@@ -151,7 +151,7 @@ class TestRetrieveEndpoints(unittest.TestCase):
                 "funding_pred_5m_ohlc.jsonl": "/api/futures/fundingRate/ohlc-history",
             }
             expected_preferred = {
-                "futures_ohlcv_5m.jsonl": "/api/price/ohlc-history",
+                "futures_ohlcv_5m.jsonl": "/api/futures/price/history",
                 "spot_ohlcv_5m.jsonl": "/api/spot/price/history",
                 "taker_spot_5m.jsonl": "/api/spot/taker-buy-sell-volume/history",
                 "orderbook_futures_5m.jsonl": "/api/futures/orderbook/ask-bids-history",
@@ -168,4 +168,3 @@ class TestRetrieveEndpoints(unittest.TestCase):
                 self.assertTrue(fp.exists(), f"missing {fname}")
                 rec = json.loads(fp.read_text(encoding="utf-8").splitlines()[0])
                 self.assertEqual(rec["source"], preferred, f"wrong source for {fname}")
-

@@ -142,20 +142,23 @@ etf_flows_daily.jsonl
 
 **Endpoints (preferred → fallback):**
 
-| Dataset | Preferred | Endpoint | Fallback |
-|---|---|---|---|
-| Futures OHLCV 5m | exchange(binance) | `/api/price/ohlc-history?interval=5m` | — |
-| Spot OHLCV 5m | exchange(binance) | `/api/spot/price/history?interval=5m` | — |
-| Funding 8h (settled) | exchange(binance) | `/api/futures/fundingRate/ohlc-history?interval=8h` | — |
-| Funding 5m (predicted) | exchange(binance) | `/api/futures/fundingRate/ohlc-history?interval=5m` | — |
-| Open Interest 5m | aggregated(coin) | `/api/futures/openInterest/ohlc-aggregated-history` | `/api/futures/openInterest/ohlc-history?exchange=binance` |
-| Long/Short ratios | aggregated(global) | `/api/futures/global-long-short-account-ratio/history` | top-trader exchange |
-| Taker Buy/Sell 5m (perps) | exchange(binance) | `/api/futures/taker-buy-sell-volume/history` | `/api/futures/aggregated-taker-buy-sell-volume/history` |
-| Taker Buy/Sell 5m (spot) | exchange(binance) | `/api/spot/taker-buy-sell-volume/history` | — |
-| Liquidations 5m | aggregated(coin) | `/api/futures/liquidation/aggregated-history` | `/api/futures/liquidation/history?exchange=binance` |
-| Order book (perps/spot) | exchange(binance) | `/api/*/orderbook/ask-bids-history` | — |
-| On-chain exchange balances | aggregated | `/api/exchange/balance/list?interval=1d` | — |
-| ETF flows (BTC/ETH) | aggregated | `/api/etf/<bitcoin|ethereum>/flow-history?interval=1d` | — |
+
+| Dataset                       | Preferred (v4)                                                               | Fallback/Notes                                                                                                           |
+| ----------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Futures OHLCV 5m              | `/api/futures/price/history?exchange=binance&interval=5m`                    | v3: `/api/price/ohlc-history?exchange=binance&interval=5m`                                                               |
+| Spot OHLCV 5m                 | `/api/spot/price/history?exchange=binance&interval=5m`                       | v3: `/api/spot/price/ohlc-history?exchange=binance&interval=5m`                                                          |
+| Funding 8h (settled)          | `/api/futures/funding-rate/history?exchange=binance&interval=8h`             | v3: `/api/futures/fundingRate/ohlc-history?exchange=binance&interval=8h`                                                 |
+| Funding 5m (predicted)        | `/api/futures/funding-rate/history?exchange=binance&interval=5m`             | Weighted predictions via `/api/futures/funding-rate/oi-weight-history` or `/api/futures/funding-rate/vol-weight-history` |
+| Open Interest 5m (aggregated) | `/api/futures/open-interest/aggregated-history?interval=5m`                  | v3 per‑exchange: `/api/futures/openInterest/ohlc-history?exchange=binance`                                               |
+| Long/Short ratios             | `/api/futures/global-long-short-account-ratio/history`                       | Top-trader exchange: `/api/futures/top-long-short-account-ratio/history`                                                 |
+| Taker Buy/Sell 5m (perps)     | `/api/futures/v2/taker-buy-sell-volume/history?exchange=binance&interval=5m` | Aggregated: `/api/futures/aggregated-taker-buy-sell-volume/history?interval=5m`                                          |
+| Taker Buy/Sell 5m (spot)      | `/api/spot/taker-buy-sell-volume/history?exchange=binance&interval=5m`       | Aggregated: `/api/spot/aggregated-taker-buy-sell-volume/history?interval=5m`                                             |
+| Liquidations 5m (aggregated)  | `/api/futures/liquidation/aggregated-history?interval=5m`                    | Exchange-specific: `/api/futures/liquidation/history?exchange=binance&interval=5m`                                       |
+| Order book (perps)            | `/api/futures/orderbook/ask-bids-history`                                    | Aggregated: `/api/futures/orderbook/aggregated-ask-bids-history`                                                         |
+| Order book (spot)             | `/api/spot/orderbook/ask-bids-history`                                       | Aggregated: `/api/spot/orderbook/aggregated-ask-bids-history`                                                            |
+| On‑chain exchange balances    | `/api/exchange/balance/list`                                                 | v3: `/api/exchange/balance/list?interval=1d`                                                                             |
+| ETF flows (BTC/ETH)           | `/api/etf/bitcoin/flow-history` & `/api/etf/ethereum/flow-history`           | HK ETFs: `/api/hk-etf/bitcoin/flow-history`                                                                              |
+
 
 **Notes:**
 - Persist raw responses; **no resampling** here. Funding 8h is forward-filled later on the 5-minute grid.  
