@@ -94,6 +94,19 @@
     - `-l INFO|DEBUG` sets retrieve log level (default INFO)
     - `--http-debug` enables low-level HTTP GET/RESP logs for retrieve (default off)
 
+## Telegram Alerts (Optional)
+- Create a bot and obtain credentials:
+  - `TELEGRAM_BOT_TOKEN` from BotFather
+  - `TELEGRAM_CHAT_ID` (your chat or channel ID)
+- Send alerts from the latest run:
+  - `PYTHONPATH=src python -m cryptostorm alert-telegram configs/example.yaml --kinds storm --only-new`
+  - Use `--kinds storm,pre_alert` to include pre‑alerts as well
+  - Add `--dry-run` to preview messages without sending
+- Inline credentials from files if preferred:
+  - `TELEGRAM_BOT_TOKEN_FILE`, `TELEGRAM_CHAT_ID_FILE`
+- E2E convenience (send after pipeline):
+  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_e2e.sh -c configs/example.yaml`
+
 ## Verify 30‑Day Coverage
 - Audit that each dataset has enough rows in the rolling 30‑day window:
   - `PYTHONPATH=src python -m cryptostorm audit configs/example.yaml --data data --min-ratio 0.95`

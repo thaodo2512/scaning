@@ -6,6 +6,7 @@ import json
 import math
 import time
 from dataclasses import dataclass
+from collections import deque
 import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
@@ -161,6 +162,85 @@ def _oi_series(data_dir: Path) -> Dict[int, float]:
     return out
 
 
+def _spot_close_series(data_dir: Path) -> Dict[int, float]:
+    fp = data_dir / _output_filename("spot_ohlcv_5m")
+    out: Dict[int, float] = {}
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        pl = rec.get("payload", {})
+        if isinstance(ts, (int, float)) and isinstance(pl, Mapping):
+            v = _as_float(pl.get("close"))
+            if isinstance(v, (int, float)):
+                out[int(ts)] = float(v)
+    return out
+
+
+def _taker_series(data_dir: Path, dataset: str) -> Dict[int, Tuple[float, float]]:
+    fp = data_dir / _output_filename(dataset)
+    out: Dict[int, Tuple[float, float]] = {}
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        pl = rec.get("payload", {})
+        if not isinstance(ts, (int, float)) or not isinstance(pl, Mapping):
+            continue
+        # try common key variants
+        buy = None
+        sell = None
+        for k in ("takerBuyVol", "buyVol", "buy", "takerBuyVolume"):
+            vb = _as_float(pl.get(k))
+            if vb is not None:
+                buy = float(vb)
+                break
+        for k in ("takerSellVol", "sellVol", "sell", "takerSellVolume"):
+            vs = _as_float(pl.get(k))
+            if vs is not None:
+                sell = float(vs)
+                break
+        if buy is not None and sell is not None:
+            out[int(ts)] = (buy, sell)
+    return out
+
+
+def _funding_pred_series(data_dir: Path) -> Dict[int, float]:
+    fp = data_dir / _output_filename("funding_pred_5m")
+    out: Dict[int, float] = {}
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        pl = rec.get("payload", {})
+        if isinstance(ts, (int, float)) and isinstance(pl, Mapping):
+            for k in ("value", "close", "rate"):
+                v = _as_float(pl.get(k))
+                if v is not None:
+                    out[int(ts)] = float(v)
+                    break
+    return out
+
+
+def _liq_series(data_dir: Path) -> Dict[int, Tuple[float, float]]:
+    fp = data_dir / _output_filename("liquidation_5m")
+    out: Dict[int, Tuple[float, float]] = {}
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        pl = rec.get("payload", {})
+        if not isinstance(ts, (int, float)) or not isinstance(pl, Mapping):
+            continue
+        notional = None
+        for k in ("notional", "value", "close", "amount", "sumNotional"):
+            vn = _as_float(pl.get(k))
+            if vn is not None:
+                notional = float(vn)
+                break
+        count = None
+        for k in ("count", "liquidationCount", "sumCount"):
+            vc = _as_float(pl.get(k))
+            if vc is not None:
+                count = float(vc)
+                break
+        if notional is not None:
+            out[int(ts)] = (notional, float(count) if isinstance(count, (int, float)) else math.nan)
+    return out
+
+
 def _debug_payload_samples(sym_dir: Path) -> None:
     LOG = logging.getLogger("cryptostorm.feature")
     for fname in (
@@ -225,6 +305,72 @@ def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
     return spread_bps
 
 
+def _orderbook_depth_ratio(data_dir: Path, bar_ts: int, max_age_s: int, range_bp: Optional[int]) -> float:
+    if not isinstance(range_bp, int) or range_bp <= 0:
+        return math.nan
+    fp = data_dir / _output_filename("orderbook_futures_5m")
+    latest: Optional[Tuple[int, Mapping[str, Any]]] = None
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        if not isinstance(ts, (int, float)):
+            continue
+        t = int(ts)
+        if t <= bar_ts and (latest is None or t > latest[0]):
+            latest = (t, rec.get("payload", {}))
+    if latest is None:
+        return math.nan
+    snap_ts, payload = latest
+    if bar_ts - snap_ts > max_age_s * 1000:
+        return math.nan
+    bids = payload.get("bids") if isinstance(payload, Mapping) else None
+    asks = payload.get("asks") if isinstance(payload, Mapping) else None
+    # Extract best prices
+    def _first_price(side):
+        if isinstance(side, list) and side:
+            top = side[0]
+            if isinstance(top, (list, tuple)) and len(top) >= 1 and isinstance(top[0], (int, float)):
+                return float(top[0])
+            if isinstance(top, Mapping):
+                p = top.get("price")
+                if isinstance(p, (int, float)):
+                    return float(p)
+        return math.nan
+    best_bid = _first_price(bids)
+    best_ask = _first_price(asks)
+    if math.isnan(best_bid) or math.isnan(best_ask) or best_bid <= 0 or best_ask <= 0:
+        return math.nan
+    mid = 0.5 * (best_bid + best_ask)
+    lo = mid * (1 - range_bp / 1e4)
+    hi = mid * (1 + range_bp / 1e4)
+
+    def _sum_size(side, is_bid: bool) -> float:
+        total = 0.0
+        if isinstance(side, list):
+            for lvl in side:
+                price = None
+                size = None
+                if isinstance(lvl, (list, tuple)) and len(lvl) >= 2:
+                    price, size = lvl[0], lvl[1]
+                elif isinstance(lvl, Mapping):
+                    price = lvl.get("price")
+                    size = lvl.get("size") or lvl.get("qty") or lvl.get("volume")
+                if isinstance(price, (int, float)) and isinstance(size, (int, float)):
+                    p = float(price)
+                    s = float(size)
+                    if is_bid and p >= lo:
+                        total += s
+                    if not is_bid and p <= hi:
+                        total += s
+        return total
+
+    bid_depth = _sum_size(bids, True)
+    ask_depth = _sum_size(asks, False)
+    denom = bid_depth + ask_depth
+    if denom <= 0:
+        return math.nan
+    return (bid_depth - ask_depth) / denom
+
+
 def _series_stats(name: str, series_keys: Iterable[int]) -> str:
     xs = list(series_keys)
     if not xs:
@@ -266,6 +412,11 @@ def build_features(
         fnd = _funding_series(sym_dir)
         ohlcv = _ohlcv_series(sym_dir)
         oi = _oi_series(sym_dir)
+        spot_close = _spot_close_series(sym_dir)
+        taker_perp = _taker_series(sym_dir, "taker_futures_5m")
+        taker_spot = _taker_series(sym_dir, "taker_spot_5m")
+        liq = _liq_series(sym_dir)
+        fund_pred = _funding_pred_series(sym_dir)
         LOG.info("%s inputs: %s | %s | %s", sym, _series_stats("ohlcv", ohlcv.keys()), _series_stats("funding_8h", fnd.keys()), _series_stats("oi", oi.keys()))
         _debug_payload_samples(sym_dir)
         LOG.debug(
@@ -277,6 +428,47 @@ def build_features(
         )
 
         rows: List[Dict[str, Any]] = []
+        # Precompute distributions for percentile features (30d window == current grid)
+        funding_vals_sorted = sorted([v for v in fnd.values() if isinstance(v, (int, float))])
+        oi_vals_sorted = sorted([v for v in oi.values() if isinstance(v, (int, float))])
+        def _pctile_rank(sorted_vals: List[float], x: Optional[float]) -> float:
+            if not sorted_vals or x is None or not isinstance(x, (int, float)):
+                return math.nan
+            # rank = fraction <= x
+            import bisect
+            i = bisect.bisect_right(sorted_vals, float(x))
+            return i / len(sorted_vals)
+
+        # Helpers for rolling windows
+        step = 5 * 60 * 1000
+        def _twap(ts: int, series: Mapping[int, float], bars: int) -> float:
+            acc = 0.0
+            n = 0
+            t = ts - (bars - 1) * step
+            while t <= ts:
+                v = series.get(t)
+                if isinstance(v, (int, float)) and not math.isnan(v):
+                    acc += float(v)
+                    n += 1
+                t += step
+            return (acc / n) if n > 0 else math.nan
+        def _roll_sum(ts: int, series: Mapping[int, float], bars: int) -> float:
+            acc = 0.0
+            n = 0
+            t = ts - (bars - 1) * step
+            while t <= ts:
+                v = series.get(t)
+                if isinstance(v, (int, float)) and not math.isnan(v):
+                    acc += float(v)
+                    n += 1
+                t += step
+            return acc if n > 0 else math.nan
+
+        # State for flows and returns
+        cvd_cum = 0.0
+        last_three_delta: deque = deque(maxlen=3)
+        last_close: Optional[float] = None
+        last_three_rets: deque = deque(maxlen=3)
         last_funding: Optional[float] = None
         missing_ohlcv = 0
         missing_oi = 0
@@ -293,6 +485,23 @@ def build_features(
                 "funding_now": math.nan,
                 "oi_now": math.nan,
                 "spread_bps": math.nan,
+                "basis_now": math.nan,
+                "basis_TWAP_60m": math.nan,
+                "basis_TWAP_120m": math.nan,
+                "funding_pctile_30d": math.nan,
+                "funding_pred_twap_60m": math.nan,
+                "oi_pctile_30d": math.nan,
+                "delta_taker_5m": math.nan,
+                "cvd_perp_5m": math.nan,
+                "cvd_perp_15m": math.nan,
+                "perp_share_60m": math.nan,
+                "depth_ratio": math.nan,
+                "liq_notional_5m": math.nan,
+                "liq_count_5m": math.nan,
+                "liq_notional_60m": math.nan,
+                "rv_15m": math.nan,
+                "exch_reserve_flag": False,
+                "etf_flow_flag": False,
                 "data_ok": True,
             }
             if ts in ohlcv:
@@ -307,12 +516,17 @@ def build_features(
                 last_funding = fnd[ts]
             if last_funding is not None:
                 row["funding_now"] = last_funding
+            # funding percentile (use settlement distribution over window)
+            row["funding_pctile_30d"] = _pctile_rank(funding_vals_sorted, last_funding)
+            # predicted funding TWAP 60m (if available)
+            row["funding_pred_twap_60m"] = _twap(ts, fund_pred, 12)
 
             # oi as snapshot (no ffill)
             if ts in oi:
                 row["oi_now"] = oi[ts]
             else:
                 missing_oi += 1
+            row["oi_pctile_30d"] = _pctile_rank(oi_vals_sorted, oi.get(ts))
 
             # order book spread; NaN if stale
             max_age = eff.max_ob_age_s or 60
@@ -321,6 +535,64 @@ def build_features(
                 row["data_ok"] = False
                 ob_stale += 1
             row["spread_bps"] = spread
+            # optional depth ratio within +/- orderbook_range_bp
+            try:
+                row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp)
+            except Exception:
+                pass
+
+            # basis proxy if spot close present
+            sc = spot_close.get(ts)
+            fc = ohlcv.get(ts, {}).get("close")
+            if isinstance(sc, (int, float)) and isinstance(fc, (int, float)) and sc != 0:
+                basis_now = (fc - sc) / sc
+                row["basis_now"] = basis_now
+                row["basis_TWAP_60m"] = _twap(ts, {t: (ohlcv.get(t, {}).get("close") - spot_close.get(t)) / spot_close.get(t) for t in grid if isinstance(spot_close.get(t), (int, float)) and spot_close.get(t) != 0 and isinstance(ohlcv.get(t, {}).get("close"), (int, float))}, 12)
+                row["basis_TWAP_120m"] = _twap(ts, {t: (ohlcv.get(t, {}).get("close") - spot_close.get(t)) / spot_close.get(t) for t in grid if isinstance(spot_close.get(t), (int, float)) and spot_close.get(t) != 0 and isinstance(ohlcv.get(t, {}).get("close"), (int, float))}, 24)
+
+            # taker flows (perps)
+            if ts in taker_perp:
+                buy, sell = taker_perp[ts]
+                if isinstance(buy, (int, float)) and isinstance(sell, (int, float)):
+                    delta = float(buy) - float(sell)
+                    row["delta_taker_5m"] = delta
+                    cvd_cum += delta
+                    row["cvd_perp_5m"] = cvd_cum
+                    last_three_delta.append(delta)
+                    row["cvd_perp_15m"] = sum(list(last_three_delta)) if len(last_three_delta) > 0 else math.nan
+            # perp share over 60m (optional, requires taker_spot)
+            if taker_spot:
+                # sum of abs(perp delta) over 12 bars vs total (perp+spot)
+                def _sum_abs(series: Mapping[int, Tuple[float, float]]) -> float:
+                    acc = 0.0
+                    t = ts - 11 * step
+                    while t <= ts:
+                        if t in series:
+                            b, s = series[t]
+                            acc += abs(float(b) - float(s))
+                        t += step
+                    return acc
+                perp_abs = _sum_abs(taker_perp)
+                spot_abs = _sum_abs(taker_spot)
+                denom = perp_abs + spot_abs
+                row["perp_share_60m"] = (perp_abs / denom) if denom > 0 else math.nan
+
+            # liquidations
+            if ts in liq:
+                notional, count = liq[ts]
+                row["liq_notional_5m"] = notional
+                row["liq_count_5m"] = count
+            # 60m window sum
+            row["liq_notional_60m"] = _roll_sum(ts, {t: liq[t][0] for t in liq}, 12)
+
+            # realized variance 15m (3 bars)
+            c = ohlcv.get(ts, {}).get("close")
+            if isinstance(c, (int, float)) and isinstance(last_close, (int, float)) and last_close > 0:
+                r = math.log(float(c) / float(last_close))
+                last_three_rets.append(r)
+                row["rv_15m"] = sum(v * v for v in last_three_rets) if len(last_three_rets) > 0 else math.nan
+            if isinstance(c, (int, float)):
+                last_close = float(c)
 
             rows.append(row)
 
@@ -337,8 +609,25 @@ def build_features(
             "close",
             "volume",
             "funding_now",
+            "funding_pctile_30d",
+            "funding_pred_twap_60m",
             "oi_now",
+            "oi_pctile_30d",
             "spread_bps",
+            "depth_ratio",
+            "basis_now",
+            "basis_TWAP_60m",
+            "basis_TWAP_120m",
+            "delta_taker_5m",
+            "cvd_perp_5m",
+            "cvd_perp_15m",
+            "perp_share_60m",
+            "liq_notional_5m",
+            "liq_count_5m",
+            "liq_notional_60m",
+            "rv_15m",
+            "exch_reserve_flag",
+            "etf_flow_flag",
             "data_ok",
         ]
         with out_fp.open("w", newline="", encoding="utf-8") as f:

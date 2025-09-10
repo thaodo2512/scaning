@@ -80,4 +80,10 @@ python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVER
 echo "[6/6] Generating interactive price+alerts (Plotly) -> reports/"
 python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out reports
 
+# Optional: send Telegram alerts (storm only) if credentials are present and SEND_TELEGRAM=1
+if [[ "${SEND_TELEGRAM:-0}" == "1" && -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
+  echo "[opt] Sending Telegram alerts (storm)"
+  python -m cryptostorm alert-telegram "$CONFIG" --kinds storm --only-new || true
+fi
+
 echo "E2E pipeline completed successfully."

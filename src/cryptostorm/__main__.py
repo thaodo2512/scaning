@@ -12,6 +12,7 @@ from .feature.engine import main as feature_main
 from .backtest.engine import main as backtest_main
 from .report.engine import main as report_main
 from .report.price_alert import main as price_alert_main
+from .notify.telegram import main as telegram_notify_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -57,6 +58,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rep2.add_argument("--data", type=str, default="data")
     p_rep2.add_argument("--artifacts", type=str)
     p_rep2.add_argument("--out", type=str, default="reports")
+
+    p_tel = sub.add_parser("alert-telegram", help="Send alerts to Telegram from artifacts/<RUN_ID>/alerts")
+    p_tel.add_argument("config", type=str)
+    p_tel.add_argument("--artifacts", type=str)
+    p_tel.add_argument("--kinds", type=str, default="storm")
+    p_tel.add_argument("--since-ts", type=int, default=None)
+    p_tel.add_argument("--only-new", action="store_true")
+    p_tel.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -125,6 +134,19 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
         return price_alert_main(argv)
+    if args.cmd == "alert-telegram":
+        argv = [args.config]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        if args.kinds:
+            argv += ["--kinds", args.kinds]
+        if args.since_ts is not None:
+            argv += ["--since-ts", str(args.since_ts)]
+        if args.only_new:
+            argv += ["--only-new"]
+        if args.dry_run:
+            argv += ["--dry-run"]
+        return telegram_notify_main(argv)
 
     return 0
 

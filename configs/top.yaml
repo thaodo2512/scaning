@@ -3,7 +3,7 @@ run:
   artifacts_root: "./artifacts"
 
 universe:
-  symbols: ["ETHUSDT", "SOLUSDT", "LTCUSDT"]
+  symbols: ["ETHUSDT"]
   tiering: { A: ["BTCUSDT","ETHUSDT"], B: 20, C: 30 }
 
 acquisition:
@@ -84,6 +84,6 @@ labels:
   horizons_min: [30, 60, 90, 120]
 
 conventions:
-  symbol_to_coin: { BTCUSDT: BTC, ETHUSDT: ETH }
+  symbol_to_coin: { BTCUSDT: BTC, ETHUSDT: ETH, SOLUSDT: SOL, LTCUSDT: LTC, WLDUSDT: WLD }
   units: { taker_volume: base, liquidation_notional: USDT, open_interest: contracts }
   orderbook: { max_snapshot_age_s: 60 }
