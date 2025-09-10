@@ -50,6 +50,17 @@ def _read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
         return []
 
 
+def _as_float(v: Any) -> Optional[float]:
+    if isinstance(v, (int, float)):
+        return float(v)
+    if isinstance(v, str):
+        try:
+            return float(v)
+        except Exception:
+            return None
+    return None
+
+
 def _make_grid(end_ms: int, days: int) -> List[int]:
     end_aligned = _align_to_5m_close(end_ms)
     start_ms = end_aligned - days * 24 * 60 * 60 * 1000
@@ -66,10 +77,15 @@ def _funding_series(data_dir: Path) -> Dict[int, float]:
         ts = rec.get("ts")
         pl = rec.get("payload", {})
         val = None
-        for k in ("value", "fundingRate", "close", "v"):
-            if isinstance(pl, Mapping) and k in pl:
-                val = pl[k]
-                break
+        if isinstance(pl, Mapping):
+            for k in ("value", "fundingRate", "rate", "close", "v"):
+                if k in pl:
+                    val = _as_float(pl[k])
+                    break
+        elif isinstance(pl, list) and pl:
+            # Heuristic: take second element if numeric
+            cand = _as_float(pl[1] if len(pl) > 1 else pl[0])
+            val = cand
         if isinstance(ts, (int, float)) and isinstance(val, (int, float)):
             out[int(ts)] = float(val)
     return out
@@ -81,14 +97,47 @@ def _ohlcv_series(data_dir: Path) -> Dict[int, Dict[str, float]]:
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
         pl = rec.get("payload", {})
-        if isinstance(ts, (int, float)) and isinstance(pl, Mapping):
-            row: Dict[str, float] = {}
-            for k in ("open", "high", "low", "close", "volume"):
-                v = pl.get(k)
-                if isinstance(v, (int, float)):
-                    row[k] = float(v)
-            if row:
-                out[int(ts)] = row
+        if not isinstance(ts, (int, float)):
+            continue
+        row: Dict[str, float] = {}
+        if isinstance(pl, Mapping):
+            # Try multiple key styles
+            key_map = {
+                "open": ("open", "o", "openPrice"),
+                "high": ("high", "h", "highPrice"),
+                "low": ("low", "l", "lowPrice"),
+                "close": ("close", "c", "closePrice"),
+                "volume": ("volume", "v", "baseVolume", "volume_usd"),
+            }
+            for outk, candidates in key_map.items():
+                for ck in candidates:
+                    v = _as_float(pl.get(ck))
+                    if v is not None:
+                        row[outk] = v
+                        break
+        elif isinstance(pl, list):
+            # Heuristic: assume [t?, open, high, low, close, volume]
+            vals = [x for x in pl]
+            try:
+                if len(vals) >= 5:
+                    # detect if first is timestamp-like (large int); if yes, shift indices by 1
+                    idx = 1 if isinstance(vals[0], (int, float)) and int(vals[0]) > 1_000_000_000_000 else 0
+                    o = vals[idx + 0]
+                    h = vals[idx + 1]
+                    l = vals[idx + 2]
+                    c = vals[idx + 3]
+                    v = vals[idx + 4] if len(vals) > idx + 4 else None
+                    for name, val in (("open", o), ("high", h), ("low", l), ("close", c)):
+                        fv = _as_float(val)
+                        if fv is not None:
+                            row[name] = fv
+                    fv = _as_float(v)
+                    if fv is not None:
+                        row["volume"] = fv
+            except Exception:
+                pass
+        if row:
+            out[int(ts)] = row
     return out
 
 
@@ -100,13 +149,41 @@ def _oi_series(data_dir: Path) -> Dict[int, float]:
         pl = rec.get("payload", {})
         val = None
         if isinstance(pl, Mapping):
-            for k in ("value", "close", "oi"):
+            for k in ("value", "close", "oi", "openInterest"):
                 if k in pl:
-                    val = pl[k]
+                    val = _as_float(pl[k])
                     break
+        elif isinstance(pl, list) and pl:
+            cand = _as_float(pl[1] if len(pl) > 1 else pl[0])
+            val = cand
         if isinstance(ts, (int, float)) and isinstance(val, (int, float)):
             out[int(ts)] = float(val)
     return out
+
+
+def _debug_payload_samples(sym_dir: Path) -> None:
+    LOG = logging.getLogger("cryptostorm.feature")
+    for fname in (
+        "futures_ohlcv_5m.jsonl",
+        "funding_8h_ohlc.jsonl",
+        "oi_5m_ohlc.jsonl",
+    ):
+        fp = sym_dir / fname
+        if not fp.exists():
+            continue
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                for i in range(3):
+                    line = f.readline()
+                    if not line:
+                        break
+                    obj = json.loads(line)
+                    pl = obj.get("payload")
+                    ptype = type(pl).__name__
+                    keys = list(pl.keys())[:6] if isinstance(pl, dict) else (f"len={len(pl)}" if isinstance(pl, list) else "")
+                    LOG.debug("sample %s: payload type=%s keys=%s", fname, ptype, keys)
+        except Exception:
+            pass
 
 
 def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
@@ -190,6 +267,7 @@ def build_features(
         ohlcv = _ohlcv_series(sym_dir)
         oi = _oi_series(sym_dir)
         LOG.info("%s inputs: %s | %s | %s", sym, _series_stats("ohlcv", ohlcv.keys()), _series_stats("funding_8h", fnd.keys()), _series_stats("oi", oi.keys()))
+        _debug_payload_samples(sym_dir)
         LOG.debug(
             "%s input alignment: %s | %s | %s",
             sym,

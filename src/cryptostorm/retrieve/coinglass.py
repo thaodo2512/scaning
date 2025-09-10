@@ -358,6 +358,8 @@ def _fetch_time_sliced(
         got = _extract_items(resp)
         LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
         items.extend(got)
+        # gentle pacing to respect rate limits
+        time.sleep(0.3)
     return items
 
 
@@ -526,9 +528,13 @@ def run_retrieve(
             _ensure_dir(out_dir)
             out_file = out_dir / _output_filename(ds_key)
             last_ts = _max_saved_ts(out_file)
-            start_ms_local = base_start_ms
-            if isinstance(last_ts, int):
-                start_ms_local = max(base_start_ms, last_ts + 1)
+            # Backfill mode: if time-slicing is enabled, ignore delta and fetch from base_start
+            if slice_days and slice_days > 0:
+                start_ms_local = base_start_ms
+            else:
+                start_ms_local = base_start_ms
+                if isinstance(last_ts, int):
+                    start_ms_local = max(base_start_ms, last_ts + 1)
             if start_ms_local >= end_ms:
                 LOG.info("up-to-date %s %s (no new range)", ds_key, sym)
                 continue
@@ -617,6 +623,16 @@ def run_retrieve(
                             "exchange": exchange,
                         }
                     items = fetch_all(fallback)
+                # Special handling for orderbook: try alternative timeEnum values if empty
+                if not items and ds_key in {"orderbook_futures_5m", "orderbook_spot_5m"} and not dry_run:
+                    for alt_enum in ("LAST_5M", "LAST_5MIN", "END_OF_5M"):
+                        if params.get("timeEnum") == alt_enum:
+                            continue
+                        params["timeEnum"] = alt_enum
+                        LOG.info("retrying %s with timeEnum=%s for %s", used_path, alt_enum, sym)
+                        items = fetch_all(used_path)
+                        if items:
+                            break
             except Exception as e:  # noqa: BLE001
                 if fallback:
                     LOG.warning("preferred endpoint failed (%s); trying fallback", e)

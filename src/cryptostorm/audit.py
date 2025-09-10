@@ -137,11 +137,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"error: {e}")
         return 2
 
-    rows, failures = audit_coverage(eff, Path(args.data), args.min_ratio)
-    # Print concise summary
+    data_root = Path(args.data)
+    rows, failures = audit_coverage(eff, data_root, args.min_ratio)
+    # Print window header
+    end_ms = _utc_now_ms()
+    start_ms = end_ms - eff.days * 24 * 60 * 60 * 1000
+    print(
+        f"Audit window: start={_ms_to_iso(start_ms)} end={_ms_to_iso(end_ms)} days={eff.days} min_ratio={args.min_ratio}"
+    )
+    # Detailed per-dataset summary
     for r in rows:
+        missing = max(0, r.expected - r.observed)
+        needed_for_pass = max(0, int((args.min_ratio * r.expected) + 0.5) - r.observed)
+        span = (
+            f"{_ms_to_iso(r.first_ts)} .. {_ms_to_iso(r.last_ts)}"
+            if (r.first_ts is not None and r.last_ts is not None)
+            else "-"
+        )
         print(
-            f"{r.symbol} {r.dataset}: observed={r.observed} expected={r.expected} ratio={r.ratio:.3f} first={_ms_to_iso(r.first_ts)} last={_ms_to_iso(r.last_ts)} file={r.file}"
+            f"{r.symbol} {r.dataset}: observed={r.observed} expected={r.expected} ratio={r.ratio:.3f} missing={missing} needed_for_pass={needed_for_pass} span={span} file={r.file}"
         )
     if failures:
         print(f"FAIL: {len(failures)} dataset(s) below ratio {args.min_ratio}")

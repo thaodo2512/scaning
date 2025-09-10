@@ -19,8 +19,8 @@ acquisition:
     prefer_aggregated: true
     paging: { page_limit: 500, backoff_initial_s: 1, backoff_max_s: 64 }
     # Retrieval tuning
-    slice_days: 2              # time-slice v4 requests by N days to avoid paging limits; 0=disable
-    force_v3: []               # datasets to fetch via v3 per-exchange endpoints (e.g., ["futures_ohlcv_5m","oi_5m_ohlc"])
+    slice_days: 1              # time-slice v4 requests by N days to avoid paging limits; 0=disable
+    #force_v3: []               # datasets to fetch via v3 per-exchange endpoints (e.g., ["futures_ohlcv_5m","oi_5m_ohlc"])
     orderbook_time_enum: LAST_OF_5M
     intervals:
       futures_ohlcv: "5m"

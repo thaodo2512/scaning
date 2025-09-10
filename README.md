@@ -23,6 +23,36 @@
   - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --dry-run --log-level INFO`
 - Live retrieval (writes JSONL under `data/<SYM>/`):
   - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --out data --log-level INFO`
+  - To fetch full 30d 5m history via v4: enable time-slicing
+    - In config (`acquisition.coinglass.slice_days: 2`) or CLI `--slice-days 2`
+  - To force reliable v3 per-exchange endpoints for selected datasets:
+    - In config: `acquisition.coinglass.force_v3: ["futures_ohlcv_5m","oi_5m_ohlc"]`
+  - Orderbook (v4) may require a time enum; set in config: `orderbook_time_enum: LAST_OF_5M`
+
+## 30‑Day History: Proven Strategies
+- Preferred: v4 time‑slicing (keeps aggregation)
+  - Set `acquisition.coinglass.slice_days: 2` (or pass `--slice-days 2`).
+  - Retriever fetches the 30‑day window in small slices (e.g., 2 days per request) and dedups by timestamp.
+  - Add a modest pause per slice to respect rate limits (already built in).
+- Fallback: v3 per‑exchange (reliable pagination)
+  - Set `acquisition.coinglass.force_v3: ["futures_ohlcv_5m","oi_5m_ohlc","taker_futures_5m","liquidation_5m"]` to page reliably.
+  - Use when v4 caps history to the latest ~500 bars for your plan.
+
+## Orderbook (v4) TimeEnum Tips
+- v4 OB endpoints require `timeEnum` instead of `interval` for 5‑minute snapshots.
+- Try `orderbook_time_enum: LAST_OF_5M` in config. If the API responds with an error, try alternatives: `LAST_5M`, `LAST_5MIN`, or `END_OF_5M`.
+- If none work, consider skipping OB temporarily or ask Coinglass support for the exact enum list for your plan.
+
+## Troubleshooting & Logs
+- Retrieval logs:
+  - Empty preferred page → logs top‑level keys and response JSON snippet.
+  - Fallback logs include `symbol/exchange/interval` and ISO start/end.
+  - Paginator stops on “no progress” (duplicate timestamps) to avoid loops.
+- Feature logs (use `--log-level DEBUG`):
+  - Prints grid span, input counts/ranges, alignment, coverage, missing counts, sample rows, and payload sample keys.
+
+## Plan Limits (Heads‑up)
+- Some plans restrict 5‑minute history length or endpoint features; if v4 slices still return only recent data, prefer the v3 fallback for time‑series datasets.
 
 ## Backtest (Item 4)
 - Walk-forward IsolationForest on features:
