@@ -61,9 +61,14 @@
   - `alerts/<SYM>.csv`, `scores/<SYM>.csv`, `metrics/metrics.json`.
 
 ## Report (Item 5)
-- Generate self-contained HTML per symbol (Lightweight Charts):
+- Full report (Lightweight Charts) — price, score, OI/liqs:
   - `PYTHONPATH=src python -m cryptostorm report configs/example.yaml --data data --features features --out reports`
-- Opens offline; to inline the charting lib without CDN, drop `lightweight-charts.standalone.production.js` at `vendor/` or `reports/vendor/`.
+  - Opens offline; to inline the charting lib without CDN, drop `lightweight-charts.standalone.production.js` at `vendor/` or `reports/vendor/`.
+
+- Interactive price+alerts (Plotly) — price line + alert markers only:
+  - `PYTHONPATH=src python -m cryptostorm report-price configs/example.yaml --data data --out reports`
+  - Reads alerts from `artifacts/<RUN_ID>/alerts/<SYM>.csv` (produce via backtest).
+  - To inline Plotly (no CDN), put `plotly-2.32.0.min.js` at `vendor/` or `reports/vendor/`.
 
 ## Outputs & Quick Checks
 - Files per symbol in `data/<SYM>/`:
@@ -81,6 +86,13 @@
 - All tests (Items 1–2):
   - `bash scripts/test.sh`
   - or `PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py' -v`
+
+## End-to-End Script
+- One-shot pipeline (validate → retrieve → features → backtest → audit → Plotly price+alerts):
+  - `bash scripts/run_e2e.sh -c configs/example.yaml`
+  - Options:
+    - `-l INFO|DEBUG` sets retrieve log level (default INFO)
+    - `--http-debug` enables low-level HTTP GET/RESP logs for retrieve (default off)
 
 ## Verify 30‑Day Coverage
 - Audit that each dataset has enough rows in the rolling 30‑day window:

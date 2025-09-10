@@ -12,6 +12,7 @@ Options:
   -f, --features <dir>    Features output directory (default: features)
   -m, --min-coverage <r>  Min coverage ratio for audit (default: 0.95)
   -l, --log-level <lvl>   Log level for retrieval (default: INFO)
+      --http-debug        Enable HTTP request/response debug logs for retrieve
       --dry-run           Dry-run retrieval (skips feature and audit)
   -h, --help              Show this help
 
@@ -27,6 +28,7 @@ FEATURES_DIR="features"
 MIN_COVERAGE="0.95"
 LOG_LEVEL="INFO"
 DRY_RUN="0"
+HTTP_DEBUG="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     -m|--min-coverage) MIN_COVERAGE="$2"; shift 2;;
     -l|--log-level) LOG_LEVEL="$2"; shift 2;;
     --dry-run) DRY_RUN="1"; shift;;
+    --http-debug) HTTP_DEBUG="1"; shift;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -58,20 +61,23 @@ fi
 
 echo "[2/4] Retrieving raw data -> $DATA_DIR (dry_run=$DRY_RUN)"
 if [[ "$DRY_RUN" == "1" ]]; then
-  python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --dry-run --log-level "$LOG_LEVEL"
+  CRYPTOSTORM_HTTP_DEBUG="$HTTP_DEBUG" python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --dry-run --log-level "$LOG_LEVEL"
   echo "Dry-run mode: skipping features build and audit"
   exit 0
 else
-  python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --log-level "$LOG_LEVEL"
+  CRYPTOSTORM_HTTP_DEBUG="$HTTP_DEBUG" python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --log-level "$LOG_LEVEL"
 fi
 
-echo "[3/4] Building features -> $FEATURES_DIR"
+echo "[3/6] Building features -> $FEATURES_DIR"
 python -m cryptostorm feature "$CONFIG" --data "$DATA_DIR" --out "$FEATURES_DIR"
 
-echo "[4/5] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
+echo "[4/6] Running backtest -> artifacts/<RUN_ID>/"
+python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR"
+
+echo "[5/6] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
 python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE"
 
-echo "[5/5] Generating per-symbol HTML reports -> reports/"
-python -m cryptostorm report "$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --out reports
+echo "[6/6] Generating interactive price+alerts (Plotly) -> reports/"
+python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out reports
 
 echo "E2E pipeline completed successfully."

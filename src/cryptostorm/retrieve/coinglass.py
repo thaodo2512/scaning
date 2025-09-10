@@ -16,6 +16,7 @@ from ..config import EffectiveConfig, load_config, validate_config
 
 
 LOG = logging.getLogger("cryptostorm.retrieve")
+_HTTP_DEBUG = os.getenv("CRYPTOSTORM_HTTP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
 
 
 def _utc_now_ms() -> int:
@@ -197,9 +198,10 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
     backoff = max(0.1, float(backoff_initial))
     while True:
         attempt += 1
-        # Log the requested URL at INFO for test visibility
+        # Log the requested URL only when HTTP debug is enabled (env) or logger is in DEBUG
         try:
-            LOG.info("HTTP GET %s", full_url)
+            if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
+                LOG.debug("HTTP GET %s", full_url)
         except Exception:
             pass
         req = urllib.request.Request(full_url, headers=dict(headers))
@@ -216,7 +218,8 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
                     # If the response isn't JSON, log textual snippet and re-raise
                     try:
                         snippet = text if len(text) <= 4000 else text[:4000] + " … (truncated)"
-                        LOG.info("HTTP RESP (non-JSON) %s %s", full_url, snippet)
+                        if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
+                            LOG.debug("HTTP RESP (non-JSON) %s %s", full_url, snippet)
                     except Exception:
                         pass
                     raise
@@ -225,7 +228,8 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
                     js = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
                     if len(js) > 8000:
                         js = js[:8000] + " … (truncated)"
-                    LOG.info("HTTP RESP %s %s", full_url, js)
+                    if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
+                        LOG.debug("HTTP RESP %s %s", full_url, js)
                 except Exception:
                     # Best-effort logging; ignore failures
                     pass

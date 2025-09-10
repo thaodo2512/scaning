@@ -143,14 +143,17 @@ def _iforest_scores(X_train: List[List[float]], X_eval: List[List[float]], param
     try:
         from sklearn.ensemble import IsolationForest  # type: ignore
 
-        model = IsolationForest(
-            random_state=random_state,
-            **{k: v for k, v in params.items() if k not in {"n_estimators", "max_samples", "max_features", "contamination", "bootstrap", "n_jobs"} or params.get(k) is not None},
-        )
-        # Ensure we pass typical args if present
-        for arg in ("n_estimators", "max_samples", "max_features", "contamination", "bootstrap", "n_jobs"):
-            if arg in params:
-                setattr(model, arg, params[arg])
+        # Normalize and cap parameters to avoid warnings (e.g., max_samples > n_train)
+        eff = dict(params or {})
+        n_train = len(X_train)
+        ms = eff.get("max_samples")
+        if isinstance(ms, (int, float)) and n_train > 0:
+            if ms > n_train:
+                eff["max_samples"] = n_train
+        allowed = {"n_estimators", "max_samples", "max_features", "contamination", "bootstrap", "n_jobs"}
+        kwargs = {k: v for k, v in eff.items() if k in allowed and v is not None}
+
+        model = IsolationForest(random_state=random_state, **kwargs)
         model.fit(X_train)
         train_scores = (-model.decision_function(X_train)).tolist()
         eval_scores = (-model.decision_function(X_eval)).tolist()
@@ -382,4 +385,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
