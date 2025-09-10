@@ -149,17 +149,59 @@ def _default_headers(api_key: str) -> Dict[str, str]:
     }
 
 
+def _path_is_v4(path: str) -> bool:
+    v4_patterns = (
+        "/api/futures/price/history",
+        "/api/spot/price/history",
+        "/api/futures/funding-rate/history",
+        "/api/futures/v2/taker-buy-sell-volume/history",
+        "/api/spot/taker-buy-sell-volume/history",
+        "/api/futures/open-interest/aggregated-history",
+        "/api/futures/liquidation/aggregated-history",
+        "/api/futures/orderbook/ask-bids-history",
+        "/api/spot/orderbook/ask-bids-history",
+        "/api/futures/orderbook/aggregated-ask-bids-history",
+        "/api/spot/orderbook/aggregated-ask-bids-history",
+    )
+    return any(path.startswith(p) for p in v4_patterns)
+
+
 def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapping[str, str], *, backoff_initial: float, backoff_max: float) -> Dict[str, Any]:
     import urllib.parse
     import urllib.request
 
     url = f"{base_url.rstrip('/')}{path}"
-    query = urllib.parse.urlencode({k: v for k, v in params.items() if v is not None})
+    # Normalize parameter names to match endpoint conventions
+    p = dict(params)
+    if _path_is_v4(path):
+        # startTime/endTime -> start_time/end_time
+        if "startTime" in p:
+            p["start_time"] = p.pop("startTime")
+        if "endTime" in p:
+            p["end_time"] = p.pop("endTime")
+        # page/pageSize not part of v4; use 'limit'
+        if "pageSize" in p:
+            p.setdefault("limit", p.get("pageSize"))
+            p.pop("pageSize", None)
+        p.pop("page", None)
+        # exchange casing commonly shown as 'Binance'
+        if "exchange" in p and isinstance(p["exchange"], str):
+            if p["exchange"].lower() == "binance":
+                p["exchange"] = "Binance"
+        # quote generally not required when using symbol=BTCUSDT
+        p.pop("quote", None)
+    # Clean None values
+    query = urllib.parse.urlencode({k: v for k, v in p.items() if v is not None})
     full_url = f"{url}?{query}" if query else url
     attempt = 0
     backoff = max(0.1, float(backoff_initial))
     while True:
         attempt += 1
+        # Log the requested URL at INFO for test visibility
+        try:
+            LOG.info("HTTP GET %s", full_url)
+        except Exception:
+            pass
         req = urllib.request.Request(full_url, headers=dict(headers))
         t0 = time.monotonic()
         try:
@@ -167,7 +209,26 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
                 raw = resp.read()
                 elapsed = (time.monotonic() - t0) * 1000
                 LOG.debug("GET %s -> %s in %.1f ms", full_url, resp.status, elapsed)
-                data = json.loads(raw.decode("utf-8"))
+                text = raw.decode("utf-8", errors="replace")
+                try:
+                    data = json.loads(text)
+                except Exception:
+                    # If the response isn't JSON, log textual snippet and re-raise
+                    try:
+                        snippet = text if len(text) <= 4000 else text[:4000] + " … (truncated)"
+                        LOG.info("HTTP RESP (non-JSON) %s %s", full_url, snippet)
+                    except Exception:
+                        pass
+                    raise
+                # Log JSON response in compact single-line form (truncated)
+                try:
+                    js = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                    if len(js) > 8000:
+                        js = js[:8000] + " … (truncated)"
+                    LOG.info("HTTP RESP %s %s", full_url, js)
+                except Exception:
+                    # Best-effort logging; ignore failures
+                    pass
                 return data
         except Exception as e:  # noqa: BLE001
             # Basic heuristics; treat as retryable up to a limit
@@ -227,6 +288,31 @@ def _interval_to_ms(interval: Optional[str]) -> Optional[int]:
     if s.endswith("d") and s[:-1].isdigit():
         return int(s[:-1]) * 24 * 60 * 60 * 1000
     return None
+
+
+def _floor_to_step(ms: int, step_ms: int) -> int:
+    if step_ms <= 0:
+        return ms
+    return (int(ms) // int(step_ms)) * int(step_ms)
+
+
+def _ceil_to_step(ms: int, step_ms: int) -> int:
+    if step_ms <= 0:
+        return ms
+    q, r = divmod(int(ms), int(step_ms))
+    return q * int(step_ms) if r == 0 else (q + 1) * int(step_ms)
+
+
+def _canonical_interval_ms(ds_key: str, interval: Optional[str]) -> Optional[int]:
+    """Resolve a concrete step size in ms for alignment.
+
+    - Most datasets use their declared interval.
+    - Orderbook "last_of_5m" is treated as a 5-minute grid for alignment.
+    """
+    # Treat orderbook sampling as 5-minute grid
+    if ds_key in {"orderbook_futures_5m", "orderbook_spot_5m"}:
+        return 5 * 60 * 1000
+    return _interval_to_ms(interval)
 
 
 def _page_iter(base_url: str, headers: Mapping[str, str], path: str, params: Dict[str, Any], *, page_limit: int, backoff_initial: float, backoff_max: float) -> Iterable[Mapping[str, Any]]:
@@ -311,6 +397,7 @@ def _build_params(
         "interval": interval,
         "startTime": start_ms,
         "endTime": end_ms,
+        # 'quote' is used in some v3 endpoints; v4 mapping removes it in _http_get
         "quote": quote,
     }
     if aggregated:
@@ -325,11 +412,13 @@ def _build_params(
         if ds_key == "liquidation_5m":
             params.update({"exchange_list": exchange})
     else:
-        params.update({"symbol": symbol, "exchange": exchange})
-    # Orderbook requires timeEnum on v4
+        # Prefer canonical 'Binance' casing for exchange; v4 mapping enforces this
+        exch = "Binance" if str(exchange).lower() == "binance" else exchange
+        params.update({"symbol": symbol, "exchange": exch})
+    # Orderbook: v4 uses 5m interval; do not use timeEnum
     if ds_key in {"orderbook_futures_5m", "orderbook_spot_5m"}:
-        if orderbook_time_enum:
-            params["timeEnum"] = orderbook_time_enum
+        params["interval"] = "5m"
+        params.pop("timeEnum", None)
     return params, aggregated
 
 
@@ -535,9 +624,30 @@ def run_retrieve(
                 start_ms_local = base_start_ms
                 if isinstance(last_ts, int):
                     start_ms_local = max(base_start_ms, last_ts + 1)
-            if start_ms_local >= end_ms:
+
+            # Align the request window to the dataset interval grid
+            step_ms = _canonical_interval_ms(ds_key, interval)
+            if step_ms:
+                start_ms_local = _ceil_to_step(start_ms_local, step_ms)
+                end_ms_aligned = _floor_to_step(end_ms, step_ms)
+            else:
+                end_ms_aligned = end_ms
+
+            if start_ms_local >= end_ms_aligned:
                 LOG.info("up-to-date %s %s (no new range)", ds_key, sym)
                 continue
+            try:
+                LOG.info(
+                    "aligned window %s %s: %s .. %s (interval=%s, step_ms=%s)",
+                    ds_key,
+                    sym,
+                    _ms_to_iso(start_ms_local),
+                    _ms_to_iso(end_ms_aligned),
+                    interval,
+                    step_ms,
+                )
+            except Exception:
+                pass
             params, aggregated = _build_params(
                 eff,
                 ds_key,
@@ -547,7 +657,7 @@ def run_retrieve(
                 exchange=exchange,
                 quote=quote,
                 start_ms=start_ms_local,
-                end_ms=end_ms,
+                end_ms=end_ms_aligned,
                 orderbook_time_enum=orderbook_time_enum,
             )
 
@@ -558,13 +668,19 @@ def run_retrieve(
                 # Use time-slicing for v4 when configured; otherwise use paging
                 if slice_days and path.startswith("/api/") and "open-interest/ohlc-history" not in path and "price/ohlc-history" not in path:
                     slice_ms = slice_days * 24 * 60 * 60 * 1000
+                    # Align the slice edges to the interval grid as well to avoid off-grid boundaries
+                    step_ms_local = _canonical_interval_ms(ds_key, interval) or slice_ms
+                    s0 = _ceil_to_step(params["startTime"], step_ms_local)
+                    e0 = _floor_to_step(params["endTime"], step_ms_local)
+                    if s0 >= e0:
+                        return []
                     return _fetch_time_sliced(
                         base_url=base_url,
                         headers=headers,
                         path=path,
-                        params=params,
-                        start_ms=params["startTime"],
-                        end_ms=params["endTime"],
+                        params={**params, "startTime": s0, "endTime": e0},
+                        start_ms=s0,
+                        end_ms=e0,
                         slice_ms=slice_ms,
                     )
                 else:
@@ -623,16 +739,7 @@ def run_retrieve(
                             "exchange": exchange,
                         }
                     items = fetch_all(fallback)
-                # Special handling for orderbook: try alternative timeEnum values if empty
-                if not items and ds_key in {"orderbook_futures_5m", "orderbook_spot_5m"} and not dry_run:
-                    for alt_enum in ("LAST_5M", "LAST_5MIN", "END_OF_5M"):
-                        if params.get("timeEnum") == alt_enum:
-                            continue
-                        params["timeEnum"] = alt_enum
-                        LOG.info("retrying %s with timeEnum=%s for %s", used_path, alt_enum, sym)
-                        items = fetch_all(used_path)
-                        if items:
-                            break
+                # No timeEnum retries for orderbook on v4; rely on interval=5m and time window
             except Exception as e:  # noqa: BLE001
                 if fallback:
                     LOG.warning("preferred endpoint failed (%s); trying fallback", e)

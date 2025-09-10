@@ -140,9 +140,16 @@ def _compute_datasets(
         else:
             interval = intervals.get(interval_key)
         mode = modes.get(mode_key)
-        # enabled: if enable flag present, respect it; otherwise default True for core, False for optional
-        default_enabled = tier == "core"
+
+        # Determine whether the dataset appears configured at all
+        configured = (interval is not None) and (mode is not None)
+
+        # enabled: if enable flag present, respect it; otherwise:
+        # - default True only for core datasets that are configured;
+        # - default False otherwise (prevents requiring unconfigured datasets).
+        default_enabled = (tier == "core") and configured
         enabled = _bool_get(enable, interval_key, default_enabled)
+
         # Special-case some enable flags with different names in spec
         if interval_key == "funding_pred_5m":
             enabled = _bool_get(enable, "funding_pred_5m", enabled)
@@ -154,7 +161,10 @@ def _compute_datasets(
             enabled = _bool_get(enable, "orderbook_spot_5m", enabled)
 
         datasets[interval_key] = DatasetConfig(
-            name=interval_key, interval=str(interval) if interval is not None else None, mode=str(mode) if mode is not None else None, enabled=enabled
+            name=interval_key,
+            interval=str(interval) if interval is not None else None,
+            mode=str(mode) if mode is not None else None,
+            enabled=enabled,
         )
     return datasets
 
@@ -255,7 +265,7 @@ def validate_config(
     # Compute datasets
     datasets = _compute_datasets(intervals, modes, enable)
 
-    # Required datasets sanity
+    # Required datasets sanity: only enforce requirements for datasets that are enabled
     required_keys = [
         "futures_ohlcv_5m",
         "funding_8h",
@@ -267,6 +277,9 @@ def validate_config(
         ds = datasets.get(k)
         if not ds:
             errors.append(f"missing dataset config for {k}")
+            continue
+        if not ds.enabled:
+            # If not enabled, do not require interval/mode
             continue
         if not ds.interval:
             errors.append(f"intervals.{k} must be defined (e.g., '5m'/'8h')")

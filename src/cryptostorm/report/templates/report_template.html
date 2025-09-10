@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg'/>">
+  <title>CryptoStorm Report - {{ symbol }}</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; background: #111; color: #ddd; }
+    .wrap { display: grid; grid-template-rows: 48vh 24vh 24vh; grid-gap: 6px; padding: 6px; }
+    .panel { position: relative; border: 1px solid #333; border-radius: 6px; }
+    .title { position: absolute; top: 6px; left: 10px; font-size: 12px; color: #bbb; z-index: 10; }
+    #top, #mid, #bot { height: 100%; }
+    .empty-msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#777; font-size:12px; }
+  </style>
+  {{ lightweight_charts_script | safe }}
+  <script>
+    // Keep variable names for compatibility with existing tests
+    const priceRaw = {{ (price_raw or price_data) | tojson }};
+    const scoreRaw = {{ (score_raw or score_data) | tojson }};
+    const thrRaw = {{ (thr_raw or threshold_data) | tojson }};
+    const oiRaw = {{ (oi_raw or oi_data) | tojson }};
+    const liqRaw = {{ (liq_raw or liq_data) | tojson }};
+    const markers = {{ markers | tojson }};
+    const overlays = {{ overlays | tojson }};
+    const chartConfig = {{ chart_config | tojson }};
+
+    const isFiniteNum = (v) => typeof v === 'number' && Number.isFinite(v);
+    const candles = priceRaw.filter(p => p && isFiniteNum(p.time) && isFiniteNum(p.open) && isFiniteNum(p.high) && isFiniteNum(p.low) && isFiniteNum(p.close));
+    const score = scoreRaw.filter(p => p && isFiniteNum(p.time) && isFiniteNum(p.value));
+    const thr = thrRaw.filter(p => p && isFiniteNum(p.time) && isFiniteNum(p.value));
+    const oi = oiRaw.filter(p => p && isFiniteNum(p.time) && isFiniteNum(p.value));
+    const liq = liqRaw.filter(p => p && isFiniteNum(p.time) && isFiniteNum(p.value));
+  </script>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel"><div class="title">{{ symbol }} — Price + Alerts</div><div id="top"></div></div>
+    <div class="panel"><div class="title">IsolationForest Score</div><div id="mid"></div></div>
+    <div class="panel"><div class="title">Open Interest + Liquidations</div><div id="bot"></div></div>
+  </div>
+  <script>
+    function makeChart(container, opts) {
+      const chart = LightweightCharts.createChart(container, Object.assign({}, chartConfig.default || {}, opts || {}));
+      const resize = () => chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      new ResizeObserver(resize).observe(container);
+      resize();
+      return chart;
+    }
+
+    const topEl = document.getElementById('top');
+    const midEl = document.getElementById('mid');
+    const botEl = document.getElementById('bot');
+
+    const chartTop = makeChart(topEl);
+    const chartMid = makeChart(midEl);
+    const chartBot = makeChart(botEl);
+
+    const candle = chartTop.addCandlestickSeries(chartConfig.candleSeries || {});
+    if (candles.length) {
+      candle.setData(candles);
+      if (markers.length) candle.setMarkers(markers);
+    } else {
+      const m = document.createElement('div');
+      m.className = 'empty-msg';
+      m.textContent = 'No price data available';
+      topEl.appendChild(m);
+    }
+
+    if (overlays.funding) {
+      const fline = chartTop.addLineSeries({ color:'#f1c40f', lineWidth:1 });
+      fline.setData(overlays.funding);
+    }
+
+    const scoreLine = chartMid.addLineSeries(chartConfig.scoreLine || { color:'#3498db', lineWidth:2 });
+    if (score.length) {
+      scoreLine.setData(score);
+    } else {
+      const m = document.createElement('div');
+      m.className = 'empty-msg';
+      m.textContent = 'No model scores — run backtest for this run_id';
+      midEl.appendChild(m);
+    }
+    if (thr.length) {
+      const thrLine = chartMid.addLineSeries(chartConfig.thresholdLine || { color:'#95a5a6', lineWidth:1 });
+      thrLine.setData(thr);
+    }
+
+    const oiArea = chartBot.addAreaSeries(chartConfig.oiArea || { lineColor:'#2ecc71', topColor:'rgba(46, 204, 113, 0.4)', bottomColor:'rgba(46, 204, 113, 0.0)' });
+    if (oi.length) oiArea.setData(oi);
+    const liqHist = chartBot.addHistogramSeries(chartConfig.liqHistogram || { color:'#9b59b6' });
+    if (liq.length) liqHist.setData(liq);
+    if (!oi.length && !liq.length) {
+      const m = document.createElement('div');
+      m.className = 'empty-msg';
+      m.textContent = 'No OI/Liquidation data available';
+      botEl.appendChild(m);
+    }
+
+    function sync(from, toA, toB) {
+      from.timeScale().subscribeVisibleTimeRangeChange((range) => {
+        if (range && range.from != null && range.to != null) {
+          const vr = { from: range.from, to: range.to };
+          try { toA.timeScale().setVisibleRange(vr); } catch (e) {}
+          try { toB.timeScale().setVisibleRange(vr); } catch (e) {}
+        }
+      });
+    }
+    sync(chartTop, chartMid, chartBot);
+    sync(chartMid, chartTop, chartBot);
+    sync(chartBot, chartTop, chartMid);
+  </script>
+</body>
+</html>
+

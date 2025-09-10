@@ -2,12 +2,40 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import logging
 
 from cryptostorm.config import validate_config
 from cryptostorm.retrieve.coinglass import run_retrieve
 
 
 RUN_LIVE = os.getenv("RUN_LIVE_COINGLASS") == "1"
+
+# Configure test logging to file for visibility of URLs and outputs
+_LOG_FILE = os.getenv("CRYPTOSTORM_LOG_FILE", "test.log")
+try:
+    # Reset the file each test session for clarity
+    Path(_LOG_FILE).unlink(missing_ok=True)
+except Exception:
+    pass
+
+_logger = logging.getLogger("cryptostorm")
+_logger.setLevel(logging.INFO)
+_logger.propagate = False  # avoid duplicate logs via root
+
+# Attach file handler once
+_abs = str(Path(_LOG_FILE).resolve())
+_needs_handler = True
+for h in _logger.handlers:
+    if isinstance(h, logging.FileHandler) and getattr(h, "baseFilename", "") == _abs:
+        _needs_handler = False
+        break
+if _needs_handler:
+    _fh = logging.FileHandler(_abs, mode="a", encoding="utf-8")
+    _fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    _fh.setLevel(logging.INFO)
+    _logger.addHandler(_fh)
+
+_TEST_LOG = logging.getLogger("cryptostorm.tests")
 
 
 @unittest.skipUnless(RUN_LIVE, "Set RUN_LIVE_COINGLASS=1 to enable live Coinglass test")
@@ -82,6 +110,7 @@ class TestLiveCoinglass(unittest.TestCase):
                 self.fail(f"Config invalid: {errs}")
 
             out_root = tdp / "data"
+            _TEST_LOG.info("Starting funding_8h smoke test; output root=%s", out_root)
             run_retrieve(
                 eff,
                 base_url="https://open-api-v4.coinglass.com",
@@ -98,6 +127,9 @@ class TestLiveCoinglass(unittest.TestCase):
             fp = out_root / "BTCUSDT" / "funding_8h_ohlc.jsonl"
             self.assertTrue(fp.exists(), "funding_8h file not created")
             contents = fp.read_text(encoding="utf-8").strip().splitlines()
+            _TEST_LOG.info("Wrote %d lines to %s", len(contents), fp)
+            for i, line in enumerate(contents[:3]):
+                _TEST_LOG.info("sample[%d]: %s", i, line)
         self.assertGreater(len(contents), 0, "No funding_8h rows returned")
 
     def test_live_futures_5m_30d_coverage_v4_timesliced(self):
@@ -135,6 +167,10 @@ class TestLiveCoinglass(unittest.TestCase):
             eff, warns, errs = validate_config(cfg, require_env=False)
             self.assertEqual(errs, [], f"invalid config: {errs}")
             out_root = tdp / "data"
+            _TEST_LOG.info(
+                "Starting futures_5m 30d coverage test; slice_days=1; out=%s",
+                out_root,
+            )
 
             # Execute the data retrieval
             run_retrieve(
@@ -157,6 +193,7 @@ class TestLiveCoinglass(unittest.TestCase):
 
             fp = out_root / "BTCUSDT" / "futures_ohlcv_5m.jsonl"
             self.assertTrue(fp.exists(), "Output file futures_ohlcv_5m.jsonl was not created.")
+            _TEST_LOG.info("Output file exists: %s", fp)
 
             # Calculate the expected number of data points (bars) for the period.
             bars_per_day = (24 * 60) / EXPECTED_INTERVAL_MINUTES
@@ -177,6 +214,12 @@ class TestLiveCoinglass(unittest.TestCase):
 
             observed_bars = len(ts_set)
             actual_coverage_percent = (observed_bars / expected_bars) * 100 if expected_bars > 0 else 0
+            _TEST_LOG.info(
+                "coverage: observed=%d expected=%d (%.1f%%)",
+                observed_bars,
+                expected_bars,
+                actual_coverage_percent,
+            )
 
             # --- 3. Improved Assertion Message ---
             # The failure message now provides precise numbers for easier debugging.
