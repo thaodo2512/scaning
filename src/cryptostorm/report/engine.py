@@ -258,14 +258,15 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
     const botEl = document.getElementById('bot');
 
     // Avoid using global name 'top' which conflicts with window.top in browsers
-    const chartTop = makeChart(topEl);
+    const chartTop = makeChart(topEl, {{ leftPriceScale: {{ borderVisible:false, visible:true }} }});
     const chartMid = makeChart(midEl);
     const chartBot = makeChart(botEl);
 
-    const candle = chartTop.addCandlestickSeries({{ upColor:'#26a69a', downColor:'#ef5350', borderVisible:false, wickUpColor:'#26a69a', wickDownColor:'#ef5350' }});
-    if (candles.length) {{
-      candle.setData(candles);
-      if (markers.length) candle.setMarkers(markers);
+    const priceLineData = candles.map(c => ({{ time: c.time, value: c.close }}));
+    const priceLine = chartTop.addLineSeries({{ color:'#9bd', lineWidth:2 }});
+    if (priceLineData.length) {{
+      priceLine.setData(priceLineData);
+      if (markers.length) priceLine.setMarkers(markers);
     }} else {{
       const m = document.createElement('div');
       m.className = 'empty-msg';
@@ -275,7 +276,7 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
 
     // Optional overlays
     if (overlays.funding) {{
-      const fline = chartTop.addLineSeries({{ color:'#f1c40f', lineWidth:1 }});
+      const fline = chartTop.addLineSeries({{ color:'#f1c40f', lineWidth:1, priceScaleId: 'left' }});
       fline.setData(overlays.funding);
     }}
 

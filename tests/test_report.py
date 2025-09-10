@@ -83,7 +83,8 @@ class TestReport(unittest.TestCase):
             html = (out_dir / "BTCUSDT.html").read_text(encoding="utf-8")
             self.assertIn("LightweightCharts", html)
             self.assertIn("BTCUSDT — Price + Alerts", html)
-            self.assertTrue(("candlestickSeries" in html) or ("addCandlestickSeries" in html))
+            # Accept either candlestick or line rendering for price
+            self.assertTrue(("addCandlestickSeries" in html) or ("addLineSeries" in html))
 
 
 if __name__ == "__main__":
