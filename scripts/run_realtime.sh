@@ -20,6 +20,7 @@ Options:
       --send-telegram        Send alerts via Telegram (env creds required)
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
       --log-level <lvl>      Log level for realtime (default: INFO)
+      --report-engine <eng>  Report engine: plotly|lightweight|price (default: plotly)
 
 Env:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (for --send-telegram)
@@ -42,6 +43,7 @@ JITTER="2"
 SEND_TG="0"
 TG_KINDS="storm"
 LOG_LEVEL="INFO"
+REPORT_ENGINE="plotly"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -58,6 +60,7 @@ while [[ $# -gt 0 ]]; do
     --send-telegram) SEND_TG="1"; shift;;
     --telegram-kinds) TG_KINDS="$2"; shift 2;;
     --log-level) LOG_LEVEL="$2"; shift 2;;
+    --report-engine) REPORT_ENGINE="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -83,10 +86,18 @@ if [[ "$SEND_TG" == "1" ]]; then RT_ARGS+=(--send-telegram --telegram-kinds "$TG
 python -m cryptostorm realtime "${RT_ARGS[@]}"
 
 if [[ "$ONCE" == "1" ]]; then
-  echo "[3/3] Build reports -> $REPORTS_DIR"
-  python -m cryptostorm report "$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --out "$REPORTS_DIR"
-  echo "Done. Open $REPORTS_DIR/<SYM>.html"
+  echo "[3/3] Build reports -> $REPORTS_DIR (engine=$REPORT_ENGINE)"
+  case "$REPORT_ENGINE" in
+    plotly)
+      python -m cryptostorm report-plotly "$CONFIG" --data "$DATA_DIR" --out "$REPORTS_DIR" ;;
+    lightweight)
+      python -m cryptostorm report "$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --out "$REPORTS_DIR" ;;
+    price)
+      python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out "$REPORTS_DIR" ;;
+    *)
+      echo "Unknown report engine: $REPORT_ENGINE (use plotly|lightweight|price)" >&2; exit 2;;
+  esac
+  echo "Done. Open $REPORTS_DIR/<SYM>$( [[ "$REPORT_ENGINE" == "plotly" ]] && echo _plotly ).html"
 else
   echo "Realtime watch started; press Ctrl+C to stop."
 fi
-

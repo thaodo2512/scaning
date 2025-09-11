@@ -108,9 +108,13 @@
 
 ## End-to-End Realtime
 - Convenience script to run realtime once (validate → realtime → report):
-  - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once`
+  - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once --report-engine plotly`
 - Continuous watch (5m-aligned loop), with Telegram alerts:
-  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2`
+  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
+  - `--report-engine` options:
+    - `plotly` (default): generates `<SYM>_plotly.html`
+    - `lightweight`: generates `<SYM>.html`
+    - `price`: Plotly price+alerts only, `<SYM>_price_alert.html`
 
 ## Realtime (Phase 2)
 - Retrieve watch mode with parallel workers and global RPS limiter:
