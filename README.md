@@ -185,6 +185,12 @@
 - One‑shot (single cycle + reports):
   - `COINGLASS_API_KEY=... docker compose run --rm backfill`
   - Open `reports/index.html`
+- Backfill data (audit + fetch missing):
+  - Standard: `COINGLASS_API_KEY=... docker compose run --rm backfill`
+  - Faster (tune workers/RPS):
+    - `COINGLASS_API_KEY=... docker compose run --rm backfill bash -lc "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --build-reports --ensure-workers 12 --ensure-rps 6"`
+  - Raw‑only (retrieve deltas, skip features/score/reports):
+    - `COINGLASS_API_KEY=... docker compose run --rm backfill python -m cryptostorm retrieve configs/realtime.yaml --out data --watch --once --workers 8 --rps 3`
 - Optional services:
   - API: `docker compose up api` (http://localhost:8000)
   - Monitor (console): `docker compose run --rm monitor`
