@@ -172,14 +172,23 @@ ENDPOINTS: Dict[str, Endpoint] = {
 
 
 def _default_headers(api_key: str) -> Dict[str, str]:
-    # Coinglass docs vary; support common header names
+    # Legacy default (kept for backwards-compatibility in non-v4 paths)
     return {
         "Accept": "application/json",
         "User-Agent": "cryptostorm/0.1",
         "coinglassSecret": api_key,
-        "CG-API-KEY": api_key,
-        "X-API-KEY": api_key,
     }
+
+
+def _headers_for_path(api_key: str, path: str) -> Dict[str, str]:
+    base = {"Accept": "application/json", "User-Agent": "cryptostorm/0.1"}
+    # Prefer explicit CG-API-KEY for v4 endpoints; use legacy names for v3
+    if _path_is_v4(path):
+        base["CG-API-KEY"] = api_key
+    else:
+        base["coinglassSecret"] = api_key
+        base["X-API-KEY"] = api_key
+    return base
 
 
 def _path_is_v4(path: str) -> bool:
@@ -766,6 +775,7 @@ def run_retrieve(
                     return []
                 # Use time-slicing for v4 when configured; otherwise use paging
                 target_base = (host or base_url)
+                headers2 = _headers_for_path(api_key or "", path)
                 if slice_days and _path_is_v4(path):
                     slice_ms = slice_days * 24 * 60 * 60 * 1000
                     # Align the slice edges to the interval grid as well to avoid off-grid boundaries
@@ -779,7 +789,7 @@ def run_retrieve(
                     eff_limit = max(1, min(1000, int(page_limit) if isinstance(page_limit, int) else 1000))
                     return _fetch_time_sliced(
                         base_url=target_base,
-                        headers=headers,
+                        headers=headers2,
                         path=path,
                         params={**params, "startTime": s0, "endTime": e0, "limit": eff_limit},
                         start_ms=s0,
@@ -790,7 +800,7 @@ def run_retrieve(
                     return list(
                         _page_iter(
                             target_base,
-                            headers,
+                            headers2,
                             path,
                             params,
                             page_limit=page_limit,
