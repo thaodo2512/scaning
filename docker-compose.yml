@@ -1,0 +1,46 @@
+version: "3.8"
+services:
+  backfill:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+      - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+    volumes:
+      - ./:/app
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --report-engine plotly"]
+
+  realtime:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+      - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+    volumes:
+      - ./:/app
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2"]
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+    volumes:
+      - ./:/app
+    command: ["python", "-m", "cryptostorm", "api", "configs/realtime.yaml", "--data", "data", "--features", "features", "--reports", "reports", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  monitor:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+    volumes:
+      - ./:/app
+    command: ["python", "-m", "cryptostorm", "monitor", "configs/realtime.yaml", "--data", "data", "--features", "features", "--symbols", "20", "--view", "alerts"]
+    stdin_open: true
+    tty: true
+
