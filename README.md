@@ -112,16 +112,16 @@
   - Continuous watch (5m-aligned loop), with Telegram alerts:
     - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
     - `--report-engine` options:
-      - `plotly` (default): generates `<SYM>_plotly.html`
-      - `lightweight`: generates `<SYM>.html`
-      - `price`: Plotly price+alerts only, `<SYM>_price_alert.html`
+    - `price` (default): Plotly price+alerts only, `<SYM>_price_alert.html`
+    - `plotly`: full report with candles, score, OI+liq, `<SYM>_plotly.html`
+    - `lightweight`: lightweight-charts report, `<SYM>.html`
   - Fill gaps automatically and launch console monitor:
     - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --monitor --monitor-view alerts`
     - `--ensure-data` runs an audit and, if coverage < `--ensure-min-ratio` (default 0.95), backfills via `retrieve --watch --once` with `--ensure-workers` (default 8) and `--ensure-rps` (default 3).
     - `--monitor` launches the console dashboard after realtime; `--monitor-view alerts` shows the latest score/alert per symbol.
   - Update reports every 5 minutes (and write `reports/index.html`):
-    - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --build-reports --report-engine plotly`
-    - Choose engine: `plotly` (default), `lightweight`, or `price`.
+    - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --build-reports`
+    - Choose engine: `price` (default), `plotly`, or `lightweight`.
 
 ### Realtime Config
 - A production‑ready config tailored for the realtime loop is provided at `configs/realtime.yaml`.

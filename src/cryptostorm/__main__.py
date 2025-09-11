@@ -99,7 +99,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--online-scoring", action="store_true")
     p_rt.add_argument("--build-reports", action="store_true")
     p_rt.add_argument("--reports", type=str, default="reports")
-    p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="plotly")
+    p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)

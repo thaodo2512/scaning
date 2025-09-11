@@ -144,7 +144,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--online-scoring", action="store_true", help="Use online scoring (no retrain) if artifacts present")
     parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
-    parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="plotly")
+    parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")

@@ -20,7 +20,7 @@ Options:
       --send-telegram        Send alerts via Telegram (env creds required)
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
       --log-level <lvl>      Log level for realtime (default: INFO)
-      --report-engine <eng>  Report engine: plotly|lightweight|price (default: plotly)
+      --report-engine <eng>  Report engine: plotly|lightweight|price (default: price)
       --build-reports        Build reports after each realtime cycle and update index.html
       --ensure-data          Audit 30d coverage and backfill missing raw data
       --ensure-min-ratio <r> Coverage threshold for ensure step (default: 0.95)
@@ -51,7 +51,7 @@ JITTER="2"
 SEND_TG="0"
 TG_KINDS="storm"
 LOG_LEVEL="INFO"
-REPORT_ENGINE="plotly"
+REPORT_ENGINE="price"
 BUILD_REPORTS="0"
 ENSURE_DATA="0"
 ENSURE_MIN_RATIO="0.95"
