@@ -8,6 +8,7 @@ import math
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+import logging
 
 from ..config import load_config, validate_config, EffectiveConfig
 from ..retrieve.coinglass import _output_filename
@@ -156,6 +157,7 @@ def _draw(
 ):
     curses.curs_set(0)
     stdscr.nodelay(True)
+    LOG = logging.getLogger("cryptostorm.monitor")
     while True:
         stdscr.erase()
         now_ms = _utc_now_ms()
@@ -177,6 +179,7 @@ def _draw(
 
         # Rows per symbol
         row = 4
+        stale_count = 0
         for i, sym in enumerate(eff.symbols[: max_symbols]):
             data_sym = data_root / sym
             if view == "alerts":
@@ -225,10 +228,25 @@ def _draw(
                         ages_ok = False
                         break
                 attr = curses.color_pair(2) if ages_ok else curses.color_pair(1)
+                if not ages_ok:
+                    stale_count += 1
             stdscr.addstr(row, 0, line[: curses.COLS - 1], attr)
             row += 1
             if row >= curses.LINES - 2:
                 break
+
+        try:
+            LOG.debug(
+                "cycle now=%s bar=%s status=%s view=%s shown=%d stale=%d",
+                _ms_to_iso(now_ms),
+                _ms_to_iso(bar_ts),
+                status,
+                view,
+                min(max_symbols, len(eff.symbols)),
+                stale_count,
+            )
+        except Exception:
+            pass
 
         # Footer
         stdscr.addstr(curses.LINES - 1, 0, f"q=quit  refresh={refresh_s}s  datasets={','.join(datasets)}  symbols_shown={min(max_symbols, len(eff.symbols))}/{len(eff.symbols)}")
@@ -238,6 +256,10 @@ def _draw(
         try:
             c = stdscr.getch()
             if c == ord('q'):
+                try:
+                    LOG.debug("quit requested via keypress")
+                except Exception:
+                    pass
                 break
         except Exception:
             pass
@@ -254,6 +276,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--symbols", type=int, default=20)
     parser.add_argument("--refresh-s", type=float, default=2.0)
     parser.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
+    parser.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging to debug.log")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -265,6 +289,20 @@ def main(argv: Optional[List[str]] = None) -> int:
     run_id = (cfg.get("run") or {}).get("run_id") or eff.run_id
     artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
     datasets = [d.strip() for d in args.datasets.split(",") if d.strip()]
+
+    # Configure debug logging if requested
+    if bool(args.debug):
+        try:
+            logging.basicConfig(
+                level=logging.DEBUG,
+                format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+                handlers=[
+                    logging.FileHandler("debug.log", mode="a", encoding="utf-8"),
+                ],
+            )
+            logging.getLogger("cryptostorm.monitor").debug("monitor started (view=%s)", args.view)
+        except Exception:
+            pass
 
     def _run(stdscr):
         curses.start_color()

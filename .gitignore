@@ -55,3 +55,4 @@ secrets/
 
 # Logs
 *.log
+debug.log

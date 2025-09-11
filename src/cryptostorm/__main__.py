@@ -128,6 +128,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_mon.add_argument("--symbols", type=int, default=20)
     p_mon.add_argument("--refresh-s", type=float, default=2.0)
     p_mon.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
+    p_mon.add_argument("--debug", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -301,6 +302,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         ]
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
+        if args.debug:
+            argv += ["--debug"]
         return monitor_main(argv)
 
     return 0
