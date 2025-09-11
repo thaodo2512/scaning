@@ -17,6 +17,7 @@ from .notify.telegram import main as telegram_notify_main
 from .realtime.engine import main as realtime_main
 from .api.server import main as api_main
 from .storage.export import main as storage_main
+from .monitor.console import main as monitor_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -114,6 +115,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_store.add_argument("--features", type=str, default="features")
     p_store.add_argument("--out", type=str)
     p_store.add_argument("--kind", type=str, default="clickhouse")
+
+    p_mon = sub.add_parser("monitor", help="Console dashboard for realtime system")
+    p_mon.add_argument("config", type=str)
+    p_mon.add_argument("--data", type=str, default="data")
+    p_mon.add_argument("--features", type=str, default="features")
+    p_mon.add_argument("--artifacts", type=str)
+    p_mon.add_argument("--datasets", type=str, default="futures_ohlcv_5m,oi_5m_ohlc,orderbook_futures_5m")
+    p_mon.add_argument("--symbols", type=int, default=20)
+    p_mon.add_argument("--refresh-s", type=float, default=2.0)
 
     args = parser.parse_args(argv)
 
@@ -270,6 +280,19 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "--kind", args.kind,
             ] + (["--out", args.out] if args.out else [])
         return storage_main(argv)
+
+    if args.cmd == "monitor":
+        argv = [
+            args.config,
+            "--data", args.data,
+            "--features", args.features,
+            "--datasets", args.datasets,
+            "--symbols", str(args.symbols),
+            "--refresh-s", str(args.refresh_s),
+        ]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        return monitor_main(argv)
 
     return 0
 

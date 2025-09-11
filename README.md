@@ -150,6 +150,12 @@
     - `GET /metrics?prom=true|false` — latest realtime SLOs (Prometheus text if `prom=true`)
   - Notes: requires `fastapi` and `uvicorn` (install if you plan to run the API)
 
+## Console Monitor (TUI)
+- Text dashboard to monitor freshness and SLOs:
+  - `PYTHONPATH=src python -m cryptostorm monitor configs/top.yaml --data data --features features --symbols 20 --refresh-s 2`
+  - Shows: now/bar times, last realtime SLOs, per‑symbol latest feature ts/age, key dataset last_ts/age (from sidecar), last alert time.
+  - Quit with `q`.
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather
