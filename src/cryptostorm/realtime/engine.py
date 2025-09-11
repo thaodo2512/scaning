@@ -57,6 +57,7 @@ def _retrieve_once(cfg: dict, eff: EffectiveConfig, *, data_root: Path) -> None:
     backoff_initial = float(paging.get("backoff_initial_s", 1))
     backoff_max = float(paging.get("backoff_max_s", 64))
     force_v3 = list(cg.get("force_v3", []) or [])
+    slice_days = int(cg.get("slice_days", 0) or 0)
     orderbook_time_enum = cg.get("orderbook_time_enum") or (
         "LAST_OF_5M" if (cg.get("intervals", {}) or {}).get("orderbook_sample") == "last_of_5m" else None
     )
@@ -73,7 +74,7 @@ def _retrieve_once(cfg: dict, eff: EffectiveConfig, *, data_root: Path) -> None:
         out_root=data_root,
         dry_run=False,
         api_key=None,
-        slice_days=0,
+        slice_days=slice_days,
         force_v3=force_v3,
         orderbook_time_enum=orderbook_time_enum,
     )
