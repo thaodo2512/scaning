@@ -774,11 +774,14 @@ def run_retrieve(
                     e0 = _floor_to_step(params["endTime"], step_ms_local)
                     if s0 >= e0:
                         return []
+                    # Many v4 endpoints expect a 'limit' even when using explicit start_time/end_time.
+                    # Use the configured page_limit capped to 1000 to avoid server-side 400 "Internal error" responses.
+                    eff_limit = max(1, min(1000, int(page_limit) if isinstance(page_limit, int) else 1000))
                     return _fetch_time_sliced(
                         base_url=target_base,
                         headers=headers,
                         path=path,
-                        params={**params, "startTime": s0, "endTime": e0},
+                        params={**params, "startTime": s0, "endTime": e0, "limit": eff_limit},
                         start_ms=s0,
                         end_ms=e0,
                         slice_ms=slice_ms,
