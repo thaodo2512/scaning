@@ -109,12 +109,21 @@
 ## End-to-End Realtime
 - Convenience script to run realtime once (validate → realtime → report):
   - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once --report-engine plotly`
-- Continuous watch (5m-aligned loop), with Telegram alerts:
-  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
-  - `--report-engine` options:
-    - `plotly` (default): generates `<SYM>_plotly.html`
-    - `lightweight`: generates `<SYM>.html`
-    - `price`: Plotly price+alerts only, `<SYM>_price_alert.html`
+  - Continuous watch (5m-aligned loop), with Telegram alerts:
+    - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
+    - `--report-engine` options:
+      - `plotly` (default): generates `<SYM>_plotly.html`
+      - `lightweight`: generates `<SYM>.html`
+      - `price`: Plotly price+alerts only, `<SYM>_price_alert.html`
+  - Fill gaps automatically and launch console monitor:
+    - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --monitor --monitor-view alerts`
+    - `--ensure-data` runs an audit and, if coverage < `--ensure-min-ratio` (default 0.95), backfills via `retrieve --watch --once` with `--ensure-workers` (default 8) and `--ensure-rps` (default 3).
+    - `--monitor` launches the console dashboard after realtime; `--monitor-view alerts` shows the latest score/alert per symbol.
+
+### Realtime Config
+- A production‑ready config tailored for the realtime loop is provided at `configs/realtime.yaml`.
+- It mirrors `configs/top.yaml` but fixes `run.run_id: realtime` so artifacts consolidate under `artifacts/realtime/`, and includes a `notifications.telegram` section.
+- Use it with the E2E script or CLI commands.
 
 ## Realtime (Phase 2)
 - Retrieve watch mode with parallel workers and global RPS limiter:
@@ -153,7 +162,9 @@
 ## Console Monitor (TUI)
 - Text dashboard to monitor freshness and SLOs:
   - `PYTHONPATH=src python -m cryptostorm monitor configs/top.yaml --data data --features features --symbols 20 --refresh-s 2`
-  - Shows: now/bar times, last realtime SLOs, per‑symbol latest feature ts/age, key dataset last_ts/age (from sidecar), last alert time.
+  - Views:
+    - `--view data` (default): now/bar times, SLOs, per‑symbol latest feature ts/age, key dataset last_ts/age, and last alert time.
+    - `--view alerts`: per‑symbol latest score ts/age + value/threshold, and latest alert kind + age (no raw dataset columns).
   - Quit with `q`.
 
 ## Telegram Alerts (Optional)

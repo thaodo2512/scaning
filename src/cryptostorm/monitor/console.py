@@ -96,7 +96,7 @@ def _read_last_slo(artifacts_root: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _read_last_alert_ts(artifacts_root: Path, sym: str) -> Optional[int]:
+def _read_last_alert(artifacts_root: Path, sym: str) -> Optional[Tuple[int, str]]:
     fp = artifacts_root / "alerts" / f"{sym}.csv"
     if not fp.exists():
         return None
@@ -105,7 +105,28 @@ def _read_last_alert_ts(artifacts_root: Path, sym: str) -> Optional[int]:
             rdr = list(csv.DictReader(f))
             if not rdr:
                 return None
-            return int(rdr[-1].get("ts") or 0)
+            last = rdr[-1]
+            t = int(last.get("ts") or 0)
+            kind = str(last.get("kind") or "")
+            return (t, kind)
+    except Exception:
+        return None
+
+
+def _read_last_score(artifacts_root: Path, sym: str) -> Optional[Tuple[int, float, float]]:
+    fp = artifacts_root / "scores" / f"{sym}.csv"
+    if not fp.exists():
+        return None
+    try:
+        with fp.open("r", encoding="utf-8") as f:
+            rdr = list(csv.DictReader(f))
+            if not rdr:
+                return None
+            last = rdr[-1]
+            ts = int(last.get("ts") or 0)
+            score = float(last.get("score") or "nan")
+            thr = float(last.get("threshold") or "nan")
+            return (ts, score, thr)
     except Exception:
         return None
 
@@ -121,7 +142,18 @@ def _age_str(now_ms: int, ts: Optional[int]) -> str:
     return f"{hrs}h"
 
 
-def _draw(stdscr, cfg: Mapping[str, Any], eff: EffectiveConfig, data_root: Path, features_root: Path, artifacts_root: Path, datasets: List[str], max_symbols: int, refresh_s: float):
+def _draw(
+    stdscr,
+    cfg: Mapping[str, Any],
+    eff: EffectiveConfig,
+    data_root: Path,
+    features_root: Path,
+    artifacts_root: Path,
+    datasets: List[str],
+    max_symbols: int,
+    refresh_s: float,
+    view: str,
+):
     curses.curs_set(0)
     stdscr.nodelay(True)
     while True:
@@ -137,29 +169,62 @@ def _draw(stdscr, cfg: Mapping[str, Any], eff: EffectiveConfig, data_root: Path,
             slo_line = f"last: lag={slo.get('scheduler_lag_s','-')}s retrieve={slo.get('retrieve_ms','-')}ms feature={slo.get('feature_ms','-')}ms score={slo.get('score_ms','-')}ms mode={slo.get('mode','-')}"
             stdscr.addstr(1, 0, slo_line[: curses.COLS - 1])
         # Table header
-        hdr = "Symbol  Feat(ts/age)  " + "  ".join([f"{ds.split('_')[0]}(ts/age)" for ds in datasets]) + "  LastAlert(age)"
+        if view == "alerts":
+            hdr = "Symbol  Score(ts/age)  value  thr  LatestAlert(kind/age)"
+        else:
+            hdr = "Symbol  Feat(ts/age)  " + "  ".join([f"{ds.split('_')[0]}(ts/age)" for ds in datasets]) + "  LastAlert(age)"
         stdscr.addstr(3, 0, hdr[: curses.COLS - 1], curses.A_UNDERLINE)
 
         # Rows per symbol
         row = 4
         for i, sym in enumerate(eff.symbols[: max_symbols]):
             data_sym = data_root / sym
-            feat_ts = _last_feature_ts(features_root / sym / "features_5m.csv")
-            parts = [sym.ljust(7), f"{_ms_to_iso(feat_ts)} / {_age_str(now_ms, feat_ts)}"]
-            for ds in datasets:
-                ts = _load_sidecar_last_ts(data_sym, ds)
-                parts.append(f"{_ms_to_iso(ts)} / {_age_str(now_ms, ts)}")
-            lat = _read_last_alert_ts(artifacts_root, sym)
-            parts.append(f"{_ms_to_iso(lat)} ({_age_str(now_ms, lat)})")
-            line = "  ".join(parts)
-            # Color by overall freshness: red if any critical ds older than 15m
-            ages_ok = True
-            for ds in datasets:
-                ts = _load_sidecar_last_ts(data_sym, ds)
-                if not isinstance(ts, int) or (now_ms - ts) > (15 * 60 * 1000):
-                    ages_ok = False
-                    break
-            attr = curses.color_pair(2) if ages_ok else curses.color_pair(1)
+            if view == "alerts":
+                # Scores + latest alert view
+                last_score = _read_last_score(artifacts_root, sym)
+                if last_score:
+                    s_ts, s_val, s_thr = last_score
+                else:
+                    s_ts, s_val, s_thr = None, float("nan"), float("nan")
+                last_alert = _read_last_alert(artifacts_root, sym)
+                if last_alert:
+                    a_ts, a_kind = last_alert
+                else:
+                    a_ts, a_kind = None, "-"
+                parts = [
+                    sym.ljust(7),
+                    f"{_ms_to_iso(s_ts)} / {_age_str(now_ms, s_ts)}",
+                    (f"{s_val:.3f}" if isinstance(s_val, float) else "nan"),
+                    (f"{s_thr:.3f}" if isinstance(s_thr, float) else "nan"),
+                    f"{a_kind} ({_age_str(now_ms, a_ts)})",
+                ]
+                line = "  ".join(parts)
+                # Color by score vs threshold when available
+                attr = curses.color_pair(2)
+                try:
+                    if (not (isinstance(s_val, float) and isinstance(s_thr, float))) or not (s_val >= s_thr):
+                        attr = curses.color_pair(1)
+                except Exception:
+                    attr = curses.color_pair(1)
+            else:
+                # Data freshness view
+                feat_ts = _last_feature_ts(features_root / sym / "features_5m.csv")
+                parts = [sym.ljust(7), f"{_ms_to_iso(feat_ts)} / {_age_str(now_ms, feat_ts)}"]
+                for ds in datasets:
+                    ts = _load_sidecar_last_ts(data_sym, ds)
+                    parts.append(f"{_ms_to_iso(ts)} / {_age_str(now_ms, ts)}")
+                last_alert = _read_last_alert(artifacts_root, sym)
+                lat_ts = last_alert[0] if last_alert else None
+                parts.append(f"{_ms_to_iso(lat_ts)} ({_age_str(now_ms, lat_ts)})")
+                line = "  ".join(parts)
+                # Color by overall freshness: red if any critical ds older than 15m
+                ages_ok = True
+                for ds in datasets:
+                    ts = _load_sidecar_last_ts(data_sym, ds)
+                    if not isinstance(ts, int) or (now_ms - ts) > (15 * 60 * 1000):
+                        ages_ok = False
+                        break
+                attr = curses.color_pair(2) if ages_ok else curses.color_pair(1)
             stdscr.addstr(row, 0, line[: curses.COLS - 1], attr)
             row += 1
             if row >= curses.LINES - 2:
@@ -188,6 +253,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--datasets", type=str, default="futures_ohlcv_5m,oi_5m_ohlc,orderbook_futures_5m")
     parser.add_argument("--symbols", type=int, default=20)
     parser.add_argument("--refresh-s", type=float, default=2.0)
+    parser.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -205,7 +271,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         curses.use_default_colors()
         curses.init_pair(1, curses.COLOR_RED, -1)
         curses.init_pair(2, curses.COLOR_GREEN, -1)
-        _draw(stdscr, cfg, eff, Path(args.data), Path(args.features), artifacts_root, datasets, max_symbols=int(args.symbols), refresh_s=float(args.refresh_s))
+        _draw(
+            stdscr,
+            cfg,
+            eff,
+            Path(args.data),
+            Path(args.features),
+            artifacts_root,
+            datasets,
+            max_symbols=int(args.symbols),
+            refresh_s=float(args.refresh_s),
+            view=str(args.view),
+        )
 
     curses.wrapper(_run)
     return 0
@@ -213,4 +290,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

@@ -21,6 +21,13 @@ Options:
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
       --log-level <lvl>      Log level for realtime (default: INFO)
       --report-engine <eng>  Report engine: plotly|lightweight|price (default: plotly)
+      --ensure-data          Audit 30d coverage and backfill missing raw data
+      --ensure-min-ratio <r> Coverage threshold for ensure step (default: 0.95)
+      --ensure-workers <n>   Workers for ensure backfill (default: 8)
+      --ensure-rps <x>       Global RPS limit for ensure backfill (default: 3)
+      --monitor              Launch console monitor after realtime step
+      --monitor-view <v>     Monitor view: data|alerts (default: alerts)
+      --monitor-symbols <n>  Symbols to show in monitor (default: 20)
 
 Env:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (for --send-telegram)
@@ -44,6 +51,13 @@ SEND_TG="0"
 TG_KINDS="storm"
 LOG_LEVEL="INFO"
 REPORT_ENGINE="plotly"
+ENSURE_DATA="0"
+ENSURE_MIN_RATIO="0.95"
+ENSURE_WORKERS="8"
+ENSURE_RPS="3"
+MONITOR="0"
+MONITOR_VIEW="alerts"
+MONITOR_SYMBOLS="20"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -61,6 +75,13 @@ while [[ $# -gt 0 ]]; do
     --telegram-kinds) TG_KINDS="$2"; shift 2;;
     --log-level) LOG_LEVEL="$2"; shift 2;;
     --report-engine) REPORT_ENGINE="$2"; shift 2;;
+    --ensure-data) ENSURE_DATA="1"; shift;;
+    --ensure-min-ratio) ENSURE_MIN_RATIO="$2"; shift 2;;
+    --ensure-workers) ENSURE_WORKERS="$2"; shift 2;;
+    --ensure-rps) ENSURE_RPS="$2"; shift 2;;
+    --monitor) MONITOR="1"; shift;;
+    --monitor-view) MONITOR_VIEW="$2"; shift 2;;
+    --monitor-symbols) MONITOR_SYMBOLS="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -76,6 +97,21 @@ export PYTHONPATH=${PYTHONPATH:-src}
 
 echo "[1/3] Validate config"
 python -m cryptostorm validate "$CONFIG" --no-require-env || true
+
+# Optional ensure-data step: audit and backfill
+if [[ "$ENSURE_DATA" == "1" ]]; then
+  echo "[1a] Audit data coverage (min_ratio=$ENSURE_MIN_RATIO)"
+  set +e
+  python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$ENSURE_MIN_RATIO"
+  AUDIT_RC=$?
+  set -e
+  if [[ "$AUDIT_RC" -ne 0 ]]; then
+    echo "[1b] Backfill missing data via retrieve --watch --once (workers=$ENSURE_WORKERS rps=$ENSURE_RPS)"
+    python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --watch --once --workers "$ENSURE_WORKERS" --rps "$ENSURE_RPS"
+    echo "[1c] Re-run audit"
+    python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$ENSURE_MIN_RATIO" || true
+  fi
+fi
 
 echo "[2/3] Realtime $( [[ "$ONCE" == "1" ]] && echo once || echo watch ) (online=$ONLINE)"
 RT_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --poll-offset-s "$POLL_OFFSET" --jitter-s "$JITTER" --log-level "$LOG_LEVEL")
@@ -100,4 +136,11 @@ if [[ "$ONCE" == "1" ]]; then
   echo "Done. Open $REPORTS_DIR/<SYM>$( [[ "$REPORT_ENGINE" == "plotly" ]] && echo _plotly ).html"
 else
   echo "Realtime watch started; press Ctrl+C to stop."
+fi
+
+# Optional monitor launch
+if [[ "$MONITOR" == "1" ]]; then
+  echo "[4/3] Launch console monitor (view=$MONITOR_VIEW)"
+  MON_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --symbols "$MONITOR_SYMBOLS" --view "$MONITOR_VIEW")
+  python -m cryptostorm monitor "${MON_ARGS[@]}"
 fi
