@@ -266,6 +266,249 @@ def _debug_payload_samples(sym_dir: Path) -> None:
             pass
 
 
+def _last_leq(series: Mapping[int, Any], ts: int) -> Optional[Any]:
+    # Return the value at the greatest key <= ts, if any
+    if not series:
+        return None
+    keys = [t for t in series.keys() if isinstance(t, int) and t <= ts]
+    if not keys:
+        return None
+    k = max(keys)
+    return series.get(k)
+
+
+def update_features_last(
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    out_root: Path,
+    now_ms: Optional[int] = None,
+) -> None:
+    """Append exactly one new 5m feature row per symbol for the latest bar.
+
+    - Computes the latest 5m close ts and derives features using current raw inputs.
+    - Creates the CSV with header if missing; skips append if ts already present.
+    - Reuses logic and conventions from build_features.
+    """
+    LOG = logging.getLogger("cryptostorm.feature")
+    now = now_ms if isinstance(now_ms, int) else _utc_now_ms()
+    step = 5 * 60 * 1000
+    ts = _align_to_5m_close(now)
+    for sym in eff.symbols:
+        sym_dir = data_root / sym
+        # Load series
+        fnd = _funding_series(sym_dir)
+        ohlcv = _ohlcv_series(sym_dir)
+        oi = _oi_series(sym_dir)
+        spot_close = _spot_close_series(sym_dir)
+        taker_perp = _taker_series(sym_dir, "taker_futures_5m")
+        taker_spot = _taker_series(sym_dir, "taker_spot_5m")
+        liq = _liq_series(sym_dir)
+        fund_pred = _funding_pred_series(sym_dir)
+
+        # Prepare percentile helpers (30d window == eff.days)
+        funding_vals_sorted = sorted([v for v in fnd.values() if isinstance(v, (int, float))])
+        oi_vals_sorted = sorted([v for v in oi.values() if isinstance(v, (int, float))])
+        def _pctile_rank(sorted_vals: List[float], x: Optional[float]) -> float:
+            if not sorted_vals or x is None or not isinstance(x, (int, float)):
+                return math.nan
+            import bisect
+            i = bisect.bisect_right(sorted_vals, float(x))
+            return i / len(sorted_vals)
+
+        # Build row
+        row: Dict[str, Any] = {
+            "ts": ts,
+            "symbol": sym,
+            "open": math.nan,
+            "high": math.nan,
+            "low": math.nan,
+            "close": math.nan,
+            "volume": math.nan,
+            "funding_now": math.nan,
+            "oi_now": math.nan,
+            "spread_bps": math.nan,
+            "basis_now": math.nan,
+            "basis_TWAP_60m": math.nan,
+            "basis_TWAP_120m": math.nan,
+            "funding_pctile_30d": math.nan,
+            "funding_pred_twap_60m": math.nan,
+            "oi_pctile_30d": math.nan,
+            "delta_taker_5m": math.nan,
+            "cvd_perp_5m": math.nan,
+            "cvd_perp_15m": math.nan,
+            "perp_share_60m": math.nan,
+            "depth_ratio": math.nan,
+            "liq_notional_5m": math.nan,
+            "liq_count_5m": math.nan,
+            "liq_notional_60m": math.nan,
+            "rv_15m": math.nan,
+            "exch_reserve_flag": False,
+            "etf_flow_flag": False,
+            "data_ok": True,
+        }
+
+        # OHLCV
+        if ts in ohlcv:
+            for k, v in ohlcv[ts].items():
+                row[k] = v
+        else:
+            row["data_ok"] = False
+
+        # Funding ffill
+        last_funding = _last_leq(fnd, ts)
+        if isinstance(last_funding, (int, float)):
+            row["funding_now"] = float(last_funding)
+        row["funding_pctile_30d"] = _pctile_rank(funding_vals_sorted, last_funding if isinstance(last_funding, (int, float)) else None)
+        # Predicted funding TWAP 60m
+        def _twap(series: Mapping[int, float], bars: int) -> float:
+            acc = 0.0
+            n = 0
+            t = ts - (bars - 1) * step
+            while t <= ts:
+                v = series.get(t)
+                if isinstance(v, (int, float)) and not math.isnan(v):
+                    acc += float(v)
+                    n += 1
+                t += step
+            return (acc / n) if n > 0 else math.nan
+        row["funding_pred_twap_60m"] = _twap(fund_pred, 12)
+
+        # OI snapshot + percentile
+        if ts in oi and isinstance(oi[ts], (int, float)):
+            row["oi_now"] = float(oi[ts])
+        row["oi_pctile_30d"] = _pctile_rank(oi_vals_sorted, oi.get(ts))
+
+        # OB spread/depth
+        max_age = eff.max_ob_age_s or 60
+        spread = _orderbook_spread_bps(sym_dir, ts, max_age)
+        if math.isnan(spread):
+            row["data_ok"] = False
+        row["spread_bps"] = spread
+        try:
+            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp)
+        except Exception:
+            pass
+
+        # Basis
+        sc = spot_close.get(ts)
+        fc = ohlcv.get(ts, {}).get("close")
+        if isinstance(sc, (int, float)) and isinstance(fc, (int, float)) and sc != 0:
+            basis_now = (fc - sc) / sc
+            row["basis_now"] = basis_now
+            # basis TWAPs
+            rel_series = {t: (ohlcv.get(t, {}).get("close") - spot_close.get(t)) / spot_close.get(t) for t in spot_close.keys() if isinstance(spot_close.get(t), (int, float)) and spot_close.get(t) != 0 and isinstance(ohlcv.get(t, {}).get("close"), (int, float))}
+            row["basis_TWAP_60m"] = _twap(rel_series, 12)
+            row["basis_TWAP_120m"] = _twap(rel_series, 24)
+
+        # Taker flows and shares
+        if ts in taker_perp:
+            b, s = taker_perp[ts]
+            if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                delta = float(b) - float(s)
+                row["delta_taker_5m"] = delta
+        # cvd as sum of deltas over window up to ts
+        cvd = 0.0
+        t = ts - eff.days * 24 * 60 * 60 * 1000
+        t = _align_to_5m_close(t)
+        while t <= ts:
+            if t in taker_perp:
+                b, s = taker_perp[t]
+                if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                    cvd += float(b) - float(s)
+            t += step
+        row["cvd_perp_5m"] = cvd
+        # last 3 deltas
+        last3 = []
+        t = ts - 2 * step
+        while t <= ts:
+            if t in taker_perp:
+                b, s = taker_perp[t]
+                if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                    last3.append(float(b) - float(s))
+            t += step
+        row["cvd_perp_15m"] = sum(last3) if last3 else math.nan
+        if taker_spot:
+            def _sum_abs(series: Mapping[int, Tuple[float, float]]) -> float:
+                acc = 0.0
+                t0 = ts - 11 * step
+                while t0 <= ts:
+                    if t0 in series:
+                        b, s = series[t0]
+                        acc += abs(float(b) - float(s))
+                    t0 += step
+                return acc
+            perp_abs = _sum_abs(taker_perp)
+            spot_abs = _sum_abs(taker_spot)
+            denom = perp_abs + spot_abs
+            row["perp_share_60m"] = (perp_abs / denom) if denom > 0 else math.nan
+
+        # Liquidations
+        if ts in liq:
+            n, c = liq[ts]
+            row["liq_notional_5m"] = n
+            row["liq_count_5m"] = c
+        # 60m rolling sum
+        acc = 0.0
+        t0 = ts - 11 * step
+        while t0 <= ts:
+            if t0 in liq:
+                acc += float(liq[t0][0])
+            t0 += step
+        row["liq_notional_60m"] = acc if acc > 0 else math.nan
+
+        # RV 15m over last three closes
+        closes: List[float] = []
+        t0 = ts - 2 * step
+        while t0 <= ts:
+            c = ohlcv.get(t0, {}).get("close")
+            if isinstance(c, (int, float)):
+                closes.append(float(c))
+            t0 += step
+        if len(closes) >= 2:
+            rets = []
+            for i in range(1, len(closes)):
+                if closes[i - 1] > 0:
+                    rets.append(math.log(closes[i] / closes[i - 1]))
+            row["rv_15m"] = sum(r * r for r in rets) if rets else math.nan
+
+        # Append to CSV if not already present
+        out_dir = out_root / sym
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_fp = out_dir / "features_5m.csv"
+        cols = [
+            "ts","symbol","open","high","low","close","volume","funding_now","funding_pctile_30d","funding_pred_twap_60m","oi_now","oi_pctile_30d","spread_bps","depth_ratio","basis_now","basis_TWAP_60m","basis_TWAP_120m","delta_taker_5m","cvd_perp_5m","cvd_perp_15m","perp_share_60m","liq_notional_5m","liq_count_5m","liq_notional_60m","rv_15m","exch_reserve_flag","etf_flow_flag","data_ok",
+        ]
+        last_ts_existing: Optional[int] = None
+        if out_fp.exists():
+            try:
+                with out_fp.open("r", encoding="utf-8") as f:
+                    lines = f.read().splitlines()
+                    if len(lines) >= 2:
+                        # last non-header row
+                        for line in reversed(lines[1:]):
+                            if line.strip():
+                                parts = line.split(",", 2)
+                                try:
+                                    last_ts_existing = int(parts[0])
+                                except Exception:
+                                    last_ts_existing = None
+                                break
+            except Exception:
+                last_ts_existing = None
+        if last_ts_existing == ts:
+            LOG.info("%s features: latest row already present (ts=%s)", sym, _ms_to_iso(ts))
+            continue
+        import csv as _csv
+        write_header = not out_fp.exists()
+        with out_fp.open("a", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=cols)
+            if write_header:
+                w.writeheader()
+            w.writerow(row)
+        LOG.info("%s appended features row ts=%s -> %s", sym, _ms_to_iso(ts), out_fp)
+
+
 def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
     fp = data_dir / _output_filename("orderbook_futures_5m")
     best_spread_bps = math.nan
@@ -686,6 +929,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--data", type=str, default="data", help="Input data root")
     parser.add_argument("--out", type=str, default="features", help="Output features root")
     parser.add_argument("--log-level", type=str, default="INFO")
+    parser.add_argument("--update-last", action="store_true", help="Append exactly one latest 5m row per symbol")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -695,7 +939,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         for e in errs:
             print(f"error: {e}")
         return 2
-    build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
+    if args.update_last:
+        update_features_last(eff, data_root=Path(args.data), out_root=Path(args.out))
+    else:
+        build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
     return 0
 
 

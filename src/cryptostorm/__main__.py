@@ -13,6 +13,7 @@ from .backtest.engine import main as backtest_main
 from .report.engine import main as report_main
 from .report.price_alert import main as price_alert_main
 from .notify.telegram import main as telegram_notify_main
+from .realtime.engine import main as realtime_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -66,6 +67,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_tel.add_argument("--since-ts", type=int, default=None)
     p_tel.add_argument("--only-new", action="store_true")
     p_tel.add_argument("--dry-run", action="store_true")
+
+    p_rt = sub.add_parser("realtime", help="Realtime loop: retrieve → features(update-last) → backtest → (optional) alerts")
+    p_rt.add_argument("config", type=str)
+    p_rt.add_argument("--data", type=str, default="data")
+    p_rt.add_argument("--features", type=str, default="features")
+    p_rt.add_argument("--artifacts", type=str)
+    p_rt.add_argument("--poll-offset-s", type=float, default=10.0)
+    p_rt.add_argument("--jitter-s", type=float, default=2.0)
+    p_rt.add_argument("--once", action="store_true")
+    p_rt.add_argument("--log-level", type=str, default="INFO")
+    p_rt.add_argument("--send-telegram", action="store_true")
+    p_rt.add_argument("--telegram-kinds", type=str, default="storm")
 
     args = parser.parse_args(argv)
 
@@ -147,6 +160,29 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.dry_run:
             argv += ["--dry-run"]
         return telegram_notify_main(argv)
+
+    if args.cmd == "realtime":
+        argv = [
+            "run",
+            args.config,
+            "--data",
+            args.data,
+            "--features",
+            args.features,
+            "--poll-offset-s",
+            str(args.poll_offset_s),
+            "--jitter-s",
+            str(args.jitter_s),
+            "--log-level",
+            args.log_level,
+        ]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        if args.once:
+            argv += ["--once"]
+        if args.send_telegram:
+            argv += ["--send-telegram", "--telegram-kinds", args.telegram_kinds]
+        return realtime_main(argv)
 
     return 0
 

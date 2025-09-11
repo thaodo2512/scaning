@@ -94,6 +94,14 @@
     - `-l INFO|DEBUG` sets retrieve log level (default INFO)
     - `--http-debug` enables low-level HTTP GET/RESP logs for retrieve (default off)
 
+## Realtime (Phase 1)
+- Single-process loop aligned to 5‑minute UTC bar closes:
+  - `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --once` (single cycle)
+  - Continuous: `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --poll-offset-s 10 --jitter-s 2`
+  - Steps per cycle: retrieve (incremental) → features `--update-last` → backtest (writes artifacts) → optional Telegram (use `--send-telegram` and env tokens)
+- Incremental feature append (without full rebuild):
+  - `PYTHONPATH=src python -m cryptostorm feature configs/example.yaml --data data --out features --update-last`
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather
