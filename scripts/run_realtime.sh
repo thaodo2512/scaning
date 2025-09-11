@@ -21,6 +21,7 @@ Options:
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
       --log-level <lvl>      Log level for realtime (default: INFO)
       --report-engine <eng>  Report engine: plotly|lightweight|price (default: plotly)
+      --build-reports        Build reports after each realtime cycle and update index.html
       --ensure-data          Audit 30d coverage and backfill missing raw data
       --ensure-min-ratio <r> Coverage threshold for ensure step (default: 0.95)
       --ensure-workers <n>   Workers for ensure backfill (default: 8)
@@ -51,6 +52,7 @@ SEND_TG="0"
 TG_KINDS="storm"
 LOG_LEVEL="INFO"
 REPORT_ENGINE="plotly"
+BUILD_REPORTS="0"
 ENSURE_DATA="0"
 ENSURE_MIN_RATIO="0.95"
 ENSURE_WORKERS="8"
@@ -75,6 +77,7 @@ while [[ $# -gt 0 ]]; do
     --telegram-kinds) TG_KINDS="$2"; shift 2;;
     --log-level) LOG_LEVEL="$2"; shift 2;;
     --report-engine) REPORT_ENGINE="$2"; shift 2;;
+    --build-reports) BUILD_REPORTS="1"; shift;;
     --ensure-data) ENSURE_DATA="1"; shift;;
     --ensure-min-ratio) ENSURE_MIN_RATIO="$2"; shift 2;;
     --ensure-workers) ENSURE_WORKERS="$2"; shift 2;;
@@ -119,6 +122,7 @@ if [[ -n "$ARTIFACTS_DIR" ]]; then RT_ARGS+=(--artifacts "$ARTIFACTS_DIR"); fi
 if [[ "$ONCE" == "1" ]]; then RT_ARGS+=(--once); fi
 if [[ "$ONLINE" == "1" ]]; then RT_ARGS+=(--online-scoring); fi
 if [[ "$SEND_TG" == "1" ]]; then RT_ARGS+=(--send-telegram --telegram-kinds "$TG_KINDS"); fi
+if [[ "$BUILD_REPORTS" == "1" ]]; then RT_ARGS+=(--build-reports --reports "$REPORTS_DIR" --report-engine "$REPORT_ENGINE"); fi
 python -m cryptostorm realtime "${RT_ARGS[@]}"
 
 if [[ "$ONCE" == "1" ]]; then

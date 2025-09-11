@@ -167,6 +167,31 @@ def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Pa
         al = _read_alerts(alerts_fp)
         html = _render_html(sym, price, al)
         (out_root / f"{sym}_price_alert.html").write_text(html, encoding="utf-8")
+    # Write a simple index to navigate reports
+    try:
+        items = []
+        import time as _t
+        now = _t.strftime("%Y-%m-%d %H:%M:%SZ", _t.gmtime())
+        for s in eff.symbols:
+            fp = out_root / f"{s}_price_alert.html"
+            if fp.exists():
+                items.append((s, fp.stat().st_mtime))
+        items.sort(key=lambda x: x[0])
+        lines = [
+            "<!doctype html>",
+            "<html><head><meta charset=\"utf-8\" />",
+            "<title>CryptoStorm Price+Alerts Reports</title>",
+            "<style>body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:#111;color:#ddd;margin:0}.wrap{padding:10px} a{color:#9bd;text-decoration:none} ul{list-style:none;padding:0} li{margin:4px 0} .ts{color:#aaa;font-size:12px}</style>",
+            "</head><body><div class=wrap>",
+            f"<h2>CryptoStorm Reports (Price+Alerts) <span class=ts>(generated {now})</span></h2>",
+            "<ul>",
+        ]
+        for s, _m in items:
+            lines.append(f"<li><a href=\"{s}_price_alert.html\">{s}</a></li>")
+        lines.extend(["</ul>", "</div></body></html>"])
+        (out_root / "index.html").write_text("\n".join(lines), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def main(argv: Optional[List[str]] = None) -> int:

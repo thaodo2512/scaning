@@ -13,6 +13,9 @@ from ..config import load_config, validate_config, EffectiveConfig
 from ..retrieve.coinglass import run_retrieve
 from ..feature.engine import update_features_last
 from ..backtest.engine import run_backtest
+from pathlib import Path
+from typing import Optional
+import json
 
 
 def _utc_now_ms() -> int:
@@ -88,6 +91,41 @@ def run_once(cfg: dict, eff: EffectiveConfig, *, data_root: Path, features_root:
             LOG.info("Telegram sending skipped or failed; ensure credentials and config path are set")
 
 
+def _write_report_index(reports_root: Path, symbols: list[str]) -> None:
+    try:
+        rows = []
+        import time as _t
+        now = _t.strftime("%Y-%m-%d %H:%M:%SZ", _t.gmtime())
+        for s in symbols:
+            items = []
+            for name in (f"{s}.html", f"{s}_plotly.html", f"{s}_price_alert.html"):
+                fp = reports_root / name
+                if fp.exists():
+                    items.append((name, fp.stat().st_mtime))
+            rows.append((s, items))
+        rows.sort(key=lambda x: x[0])
+        html = [
+            "<!doctype html>",
+            "<html><head><meta charset=\"utf-8\" />",
+            "<title>CryptoStorm Reports</title>",
+            "<style>body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:#111;color:#ddd;margin:0} .wrap{padding:10px} a{color:#9bd;text-decoration:none} table{border-collapse:collapse;width:100%} th,td{padding:6px 8px;border-bottom:1px solid #333;text-align:left} th{color:#bbb} .ts{color:#aaa;font-size:12px}</style>",
+            "</head><body><div class=wrap>",
+            f"<h2>CryptoStorm Reports <span class=ts>(generated {now})</span></h2>",
+            "<table><thead><tr><th>Symbol</th><th>Available</th></tr></thead><tbody>",
+        ]
+        for sym, items in rows:
+            links = []
+            for name, _mt in items:
+                label = name.replace(sym, "").lstrip("_") or "lightweight"
+                links.append(f"<a href=\"{name}\">{label}</a>")
+            html.append(f"<tr><td>{sym}</td><td>{' | '.join(links) if links else '-'} </td></tr>")
+        html.extend(["</tbody></table>", "</div></body></html>"])
+        reports_root.mkdir(parents=True, exist_ok=True)
+        (reports_root / "index.html").write_text("\n".join(html), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm realtime runner (Phase 1)")
     parser.add_argument("run", nargs="?", default="run", help="Subcommand placeholder (use 'run')")
@@ -102,6 +140,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--send-telegram", action="store_true")
     parser.add_argument("--telegram-kinds", type=str, default="storm")
     parser.add_argument("--online-scoring", action="store_true", help="Use online scoring (no retrain) if artifacts present")
+    parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
+    parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
+    parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="plotly")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -141,6 +182,25 @@ def main(argv: Optional[list[str]] = None) -> int:
 
             try:
                 telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
+            except Exception:
+                pass
+        # Optional reports
+        if args.build_reports:
+            try:
+                reports_root = Path(args.reports)
+                if args.report_engine == "plotly":
+                    from ..report.plotly_full import build_reports as build_plotly
+
+                    build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                elif args.report_engine == "price":
+                    from ..report.price_alert import build_reports as build_price
+
+                    build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                else:
+                    from ..report.engine import build_reports as build_lw
+
+                    build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
+                _write_report_index(reports_root, eff.symbols)
             except Exception:
                 pass
         # SLO metrics
@@ -192,6 +252,26 @@ def main(argv: Optional[list[str]] = None) -> int:
                     telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
                 except Exception:
                     pass
+            # Optional reports
+            if args.build_reports:
+                try:
+                    reports_root = Path(args.reports)
+                    if args.report_engine == "plotly":
+                        from ..report.plotly_full import build_reports as build_plotly
+
+                        build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                    elif args.report_engine == "price":
+                        from ..report.price_alert import build_reports as build_price
+
+                        build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                    else:
+                        from ..report.engine import build_reports as build_lw
+
+                        build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
+                    _write_report_index(reports_root, eff.symbols)
+                except Exception:
+                    pass
+
             slo = {
                 "ts": int(time.time()),
                 "bar_ts": int(bar_ts / 1000),

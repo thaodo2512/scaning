@@ -119,6 +119,9 @@
     - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --monitor --monitor-view alerts`
     - `--ensure-data` runs an audit and, if coverage < `--ensure-min-ratio` (default 0.95), backfills via `retrieve --watch --once` with `--ensure-workers` (default 8) and `--ensure-rps` (default 3).
     - `--monitor` launches the console dashboard after realtime; `--monitor-view alerts` shows the latest score/alert per symbol.
+  - Update reports every 5 minutes (and write `reports/index.html`):
+    - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --build-reports --report-engine plotly`
+    - Choose engine: `plotly` (default), `lightweight`, or `price`.
 
 ### Realtime Config
 - A production‑ready config tailored for the realtime loop is provided at `configs/realtime.yaml`.
@@ -166,6 +169,10 @@
     - `--view data` (default): now/bar times, SLOs, per‑symbol latest feature ts/age, key dataset last_ts/age, and last alert time.
     - `--view alerts`: per‑symbol latest score ts/age + value/threshold, and latest alert kind + age (no raw dataset columns).
   - Quit with `q`.
+
+## Reports Index
+- Report generators now write a lightweight `index.html` under the reports directory.
+- The realtime loop with `--build-reports` also refreshes `index.html` each cycle.
 
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:

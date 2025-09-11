@@ -97,6 +97,9 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--send-telegram", action="store_true")
     p_rt.add_argument("--telegram-kinds", type=str, default="storm")
     p_rt.add_argument("--online-scoring", action="store_true")
+    p_rt.add_argument("--build-reports", action="store_true")
+    p_rt.add_argument("--reports", type=str, default="reports")
+    p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="plotly")
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)
@@ -248,6 +251,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--send-telegram", "--telegram-kinds", args.telegram_kinds]
         if args.online_scoring:
             argv += ["--online-scoring"]
+        if args.build_reports:
+            argv += ["--build-reports", "--reports", args.reports, "--report-engine", args.report_engine]
         return realtime_main(argv)
 
     if args.cmd == "api":
