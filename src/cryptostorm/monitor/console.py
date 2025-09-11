@@ -276,7 +276,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--symbols", type=int, default=20)
     parser.add_argument("--refresh-s", type=float, default=2.0)
     parser.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
-    parser.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging to debug.log")
     args = parser.parse_args(argv)
 
