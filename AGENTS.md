@@ -45,3 +45,62 @@
 - Create new code under the paths above; avoid unrelated refactors.
 - Prefer `rg` for search; read files in ≤250-line chunks.
 - Do not add dependencies without justification; update docs when adding files.
+
+## Realtime Phases Implemented (v1)
+
+This repository now includes a complete Phase 0–5 realtime implementation with the following additions:
+
+- Phase 1 — Incremental Features + Realtime Loop
+  - `feature --update-last` appends exactly one 5‑minute row per symbol.
+  - `realtime` subcommand runs retrieve → features(update-last) → backtest in a 5‑minute aligned loop (supports `--once`).
+  - Script: `scripts/run_realtime.sh` (validate → realtime → report).
+
+- Phase 2 — Watch Mode + RPS Limiter + File State
+  - `retrieve --watch --workers N --rps R` with global token‑bucket limiter.
+  - Per‑file JSON sidecar last_ts at `data/<SYM>/.state/<dataset>.json` to fetch only deltas.
+
+- Phase 3 — Online Scoring + SLOs
+  - `backtest --online` scores only the latest row using persisted artifacts.
+  - Persists artifacts per symbol under `artifacts/<RUN_ID>/models/`.
+  - Realtime SLO metrics appended to `artifacts/<RUN_ID>/metrics/realtime.jsonl`.
+
+- Phase 4 — API & Live UI Hooks
+  - `api` subcommand (FastAPI + Uvicorn): endpoints for symbols, scores, alerts, latest score, reports, and `/metrics` (Prometheus text optional).
+  - Optional `--token` to require Bearer auth.
+
+- Phase 5 — Storage/Export (optional)
+  - `storage export-parquet` (raw JSONL + features CSV → Parquet; requires `pyarrow`).
+  - `storage emit-ddl --kind clickhouse|timescale` outputs DDL for raw datasets and features.
+
+## New/Updated CLI Commands
+
+- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm]`
+- `python -m cryptostorm retrieve <config> --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2 [--once]`
+- `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online]`
+- `python -m cryptostorm api <config> [--data data --features features --artifacts <dir> --reports reports --host 0.0.0.0 --port 8000 --token TOKEN]`
+- `python -m cryptostorm storage export-parquet <config> --data data --features features --out parquet`
+- `python -m cryptostorm storage emit-ddl <config> --kind clickhouse|timescale --out ./ddl`
+- Reports:
+  - Lightweight Charts: `python -m cryptostorm report <config> --data data --features features --out reports`
+  - Plotly full: `python -m cryptostorm report-plotly <config> --data data --out reports`
+  - Plotly price+alerts: `python -m cryptostorm report-price <config> --data data --out reports`
+
+## Reporting Engines
+- Default lightweight‑charts report preserved.
+- Added Plotly full reports (`report-plotly`) with candlesticks, score, OI + liq.
+  - Offline: place `plotly-2.32.0.min.js` in `vendor/` or `reports/vendor/`.
+
+## Sidecar State
+- Last_ts checkpoint per symbol/dataset: `data/<SYM>/.state/<dataset>.json`.
+- Retrieval uses this to start at `last_ts+1` (aligned), falling back to JSONL scan if absent.
+
+## Tests Added
+- Incremental features append + dedupe (`tests/test_feature_update_last.py`).
+- Realtime single‑cycle (`tests/test_realtime.py`).
+- Online scoring append (`tests/test_backtest_online.py`).
+- Retrieve sidecar state (`tests/test_retrieve_state.py`).
+- Plotly full report generation (`tests/test_report_plotly_full.py`).
+
+## Git Hygiene / Ignore
+- `.gitignore` expanded for `parquet/`, `ddl/`, `vendor/`, `*.parquet`.
+- Data directory `data/` ignored; past history purged via `git filter-repo` (use force‑push).
