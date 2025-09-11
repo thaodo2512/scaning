@@ -122,6 +122,20 @@
   - `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --online-scoring`
   - Writes per-cycle SLOs to `artifacts/<RUN_ID>/metrics/realtime.jsonl` (scheduler_lag_s, durations, mode).
 
+## Realtime (Phase 4)
+- FastAPI server for scores/alerts and reports (optional):
+  - Start: `PYTHONPATH=src python -m cryptostorm api configs/example.yaml --data data --features features --reports reports --host 0.0.0.0 --port 8000`
+  - Auth (optional): add `--token YOUR_TOKEN` and include `Authorization: Bearer YOUR_TOKEN` on requests.
+  - Endpoints:
+    - `GET /healthz` — service health
+    - `GET /symbols` — list symbols (auth if token set)
+    - `GET /scores/{symbol}?n=200` — latest N score rows
+    - `GET /alerts/{symbol}?n=200` — latest N alerts
+    - `GET /latest/score/{symbol}` — most recent score tuple
+    - `GET /report/{symbol}` — serves HTML report
+    - `GET /metrics?prom=true|false` — latest realtime SLOs (Prometheus text if `prom=true`)
+  - Notes: requires `fastapi` and `uvicorn` (install if you plan to run the API)
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather

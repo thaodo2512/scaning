@@ -14,6 +14,8 @@ from .report.engine import main as report_main
 from .report.price_alert import main as price_alert_main
 from .notify.telegram import main as telegram_notify_main
 from .realtime.engine import main as realtime_main
+from .api.server import main as api_main
+from .storage.export import main as storage_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -86,6 +88,24 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--log-level", type=str, default="INFO")
     p_rt.add_argument("--send-telegram", action="store_true")
     p_rt.add_argument("--telegram-kinds", type=str, default="storm")
+
+    p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
+    p_api.add_argument("config", type=str)
+    p_api.add_argument("--data", type=str, default="data")
+    p_api.add_argument("--features", type=str, default="features")
+    p_api.add_argument("--artifacts", type=str)
+    p_api.add_argument("--reports", type=str, default="reports")
+    p_api.add_argument("--host", type=str, default="127.0.0.1")
+    p_api.add_argument("--port", type=int, default=8000)
+    p_api.add_argument("--token", type=str, default=None)
+
+    p_store = sub.add_parser("storage", help="Storage/export utilities (Parquet, DDL)")
+    p_store.add_argument("sub", choices=["export-parquet", "emit-ddl"], help="Subcommand")
+    p_store.add_argument("config", type=str)
+    p_store.add_argument("--data", type=str, default="data")
+    p_store.add_argument("--features", type=str, default="features")
+    p_store.add_argument("--out", type=str)
+    p_store.add_argument("--kind", type=str, default="clickhouse")
 
     args = parser.parse_args(argv)
 
@@ -204,6 +224,37 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.send_telegram:
             argv += ["--send-telegram", "--telegram-kinds", args.telegram_kinds]
         return realtime_main(argv)
+
+    if args.cmd == "api":
+        argv = [
+            args.config,
+            "--data", args.data,
+            "--features", args.features,
+            "--reports", args.reports,
+            "--host", args.host,
+            "--port", str(args.port),
+        ]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        if args.token:
+            argv += ["--token", args.token]
+        return api_main(argv)
+
+    if args.cmd == "storage":
+        if args.sub == "export-parquet":
+            argv = [
+                "export-parquet",
+                args.config,
+                "--data", args.data,
+                "--features", args.features,
+            ] + (["--out", args.out] if args.out else [])
+        else:
+            argv = [
+                "emit-ddl",
+                args.config,
+                "--kind", args.kind,
+            ] + (["--out", args.out] if args.out else [])
+        return storage_main(argv)
 
     return 0
 

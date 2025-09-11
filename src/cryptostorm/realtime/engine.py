@@ -156,7 +156,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         try:
             mdir = artifacts_root / "metrics"
             mdir.mkdir(parents=True, exist_ok=True)
-            (mdir / "realtime.jsonl").open("a", encoding="utf-8").write(json.dumps(slo) + "\n")
+            with (mdir / "realtime.jsonl").open("a", encoding="utf-8") as f:
+                f.write(json.dumps(slo) + "\n")
         except Exception:
             pass
         return 0
@@ -203,7 +204,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             try:
                 mdir = artifacts_root / "metrics"
                 mdir.mkdir(parents=True, exist_ok=True)
-                (mdir / "realtime.jsonl").open("a", encoding="utf-8").write(json.dumps(slo) + "\n")
+                with (mdir / "realtime.jsonl").open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(slo) + "\n")
             except Exception:
                 pass
         except Exception as e:  # noqa: BLE001
