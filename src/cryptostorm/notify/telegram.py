@@ -129,25 +129,43 @@ def main(argv: Optional[List[str]] = None) -> int:
     artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
     alerts_dir = artifacts_root / "alerts"
 
-    kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()]
+    # Load telegram section from config for defaults/overrides
+    tg_cfg = ((cfg.get("notifications") or {}).get("telegram") or {}) if isinstance(cfg.get("notifications"), dict) else {}
+
+    # Effective flags: CLI wins when explicitly provided; otherwise use config
+    kinds_arg = args.kinds
+    kinds_cfg = str(tg_cfg.get("kinds") or "").strip()
+    # If CLI provided default 'storm' and config overrides, prefer config
+    kinds_eff_str = kinds_arg if (kinds_arg and (kinds_arg != "storm" or not kinds_cfg)) else (kinds_cfg or kinds_arg)
+    kinds = [k.strip() for k in (kinds_eff_str or "").split(",") if k.strip()]
     if not kinds:
         kinds = ["storm"]
 
-    # Resolve token/chat from env or files
+    # Resolve token/chat from env or files or config
     token = os.getenv("TELEGRAM_BOT_TOKEN") or _read_file(os.getenv("TELEGRAM_BOT_TOKEN_FILE"))
     chat_id = os.getenv("TELEGRAM_CHAT_ID") or _read_file(os.getenv("TELEGRAM_CHAT_ID_FILE"))
-    if not args.dry_run and (not token or not chat_id):
+    if not token:
+        token = (tg_cfg.get("bot_token") if isinstance(tg_cfg.get("bot_token"), str) else None) or _read_file(tg_cfg.get("bot_token_file"))
+    if not chat_id:
+        chat_id = (tg_cfg.get("chat_id") if isinstance(tg_cfg.get("chat_id"), str) else None) or _read_file(tg_cfg.get("chat_id_file"))
+
+    # Effective dry_run and since_ts / only_new
+    eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
+    eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
+    eff_only_new = bool(args.only_new or bool(tg_cfg.get("only_new")))
+
+    if not eff_dry and (not token or not chat_id):
         print("error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or *_FILE)")
         return 2
 
-    rows = _iter_alert_rows(alerts_dir, eff.symbols, kinds, args.since_ts)
+    rows = _iter_alert_rows(alerts_dir, eff.symbols, kinds, eff_since_ts)
     if not rows:
         print("No alerts to send.")
         return 0
 
     # Dedup registry
     sent_reg_path = artifacts_root / "alerts" / "telegram_sent.json"
-    sent = _load_sent_registry(sent_reg_path) if args.only_new else {}
+    sent = _load_sent_registry(sent_reg_path) if eff_only_new else {}
 
     sent_now = 0
     for r in rows:
@@ -171,7 +189,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             except Exception:
                 pass
             text = _build_message(run_id, sym, kind, ts, score, thr)
-            if args.dry_run:
+            if eff_dry:
                 print("DRY: ", text)
             else:
                 _send_telegram(token=token, chat_id=chat_id, text=text)
@@ -182,7 +200,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"warn: failed to send alert for row {r}: {e}")
             continue
 
-    if args.only_new:
+    if eff_only_new:
         _save_sent_registry(sent_reg_path, sent)
     print(f"Sent {sent_now} alerts to Telegram.")
     return 0
@@ -190,4 +208,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

@@ -154,14 +154,24 @@
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather
   - `TELEGRAM_CHAT_ID` (your chat or channel ID)
-- Send alerts from the latest run:
-  - `PYTHONPATH=src python -m cryptostorm alert-telegram configs/example.yaml --kinds storm --only-new`
-  - Use `--kinds storm,pre_alert` to include pre‑alerts as well
-  - Add `--dry-run` to preview messages without sending
-- Inline credentials from files if preferred:
-  - `TELEGRAM_BOT_TOKEN_FILE`, `TELEGRAM_CHAT_ID_FILE`
-- E2E convenience (send after pipeline):
-  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_e2e.sh -c configs/example.yaml`
+- Config‑based settings (avoid CLI/env where desired):
+  ```yaml
+  notifications:
+    telegram:
+      bot_token_file: ./secrets/telegram_bot_token.txt  # or bot_token: "..."
+      chat_id_file:   ./secrets/telegram_chat_id.txt    # or chat_id:   "..."
+      kinds: storm,pre_alert
+      only_new: true
+      since_ts: null
+      dry_run: false
+  ```
+- Send alerts from the latest run (config‑aware):
+  - `PYTHONPATH=src python -m cryptostorm alert-telegram configs/example.yaml`
+  - Override as needed: `--kinds storm`, `--only-new`, `--since-ts 1700000000000`, `--dry-run`
+- Inline credentials via env or files remain supported:
+  - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, or `*_FILE`
+- E2E convenience (send after realtime):
+  - `SEND_TELEGRAM=1 bash scripts/run_realtime.sh -c configs/example.yaml`
 
 ## Verify 30‑Day Coverage
 - Audit that each dataset has enough rows in the rolling 30‑day window:
