@@ -7,6 +7,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+import json
+import pickle
 
 from ..config import EffectiveConfig, load_config, validate_config
 
@@ -166,6 +168,50 @@ def _iforest_scores(X_train: List[List[float]], X_eval: List[List[float]], param
         return agg_abs(X_train), agg_abs(X_eval)
 
 
+def _save_online_artifact(models_dir: Path, symbol: str, *, features: List[str], stats: List[RobustStats], threshold: float, model_obj: Optional[Any], meta: Dict[str, Any]) -> None:
+    models_dir.mkdir(parents=True, exist_ok=True)
+    # Save meta JSON
+    stats_arr = [
+        {"median": s.median, "q1": s.q1, "q3": s.q3, "low": s.low, "high": s.high}
+        for s in stats
+    ]
+    payload = {
+        "symbol": symbol,
+        "features": features,
+        "stats": stats_arr,
+        "threshold": threshold,
+        **meta,
+    }
+    (models_dir / f"{symbol}.json").write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    # Save model pickle if available
+    if model_obj is not None:
+        try:
+            with (models_dir / f"{symbol}.pkl").open("wb") as fh:
+                pickle.dump(model_obj, fh)
+        except Exception:
+            pass
+
+
+def _load_online_artifact(models_dir: Path, symbol: str) -> Optional[Dict[str, Any]]:
+    meta_fp = models_dir / f"{symbol}.json"
+    if not meta_fp.exists():
+        return None
+    try:
+        meta = json.loads(meta_fp.read_text(encoding="utf-8") or "{}")
+        model = None
+        pkl_fp = models_dir / f"{symbol}.pkl"
+        if pkl_fp.exists():
+            try:
+                with pkl_fp.open("rb") as fh:
+                    model = pickle.load(fh)
+            except Exception:
+                model = None
+        meta["_model"] = model
+        return meta
+    except Exception:
+        return None
+
+
 def _symbol_tier(cfg: Mapping[str, Any], symbol: str) -> str:
     tiering = (cfg.get("universe") or {}).get("tiering") or {}
     a = tiering.get("A")
@@ -237,6 +283,7 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
             b = _retrain_block(ts, retrain_every_hours)
             blocks.setdefault(b, []).append(idx)
 
+        last_artifact: Optional[Dict[str, Any]] = None
         for b_start, idxs in sorted(blocks.items()):
             # Training window rows: those with ts in [w_start, b_start)
             w_start = _train_window_start(b_start, train_window_days)
@@ -257,7 +304,15 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
             params = {**if_defaults, **(per_tier.get(tier) or {})}
             train_scores, eval_scores = _iforest_scores(X_train, X_eval, params, random_state)
             thr = _quantile(train_scores, threshold_q)
-
+            # Record artifact snapshot (latest wins)
+            last_artifact = {
+                "features": features,
+                "stats": stats,
+                "threshold": float(thr),
+                "params": params,
+                "block_start": int(b_start),
+                "window_start": int(w_start),
+            }
             for j, i in enumerate(idxs):
                 scores[i] = float(eval_scores[j])
                 thresholds[i] = float(thr)
@@ -302,6 +357,59 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
                     w.writerow(a)
 
         write_alerts(out_alerts / f"{sym}.csv", pre_alerts + storms)
+
+        # Persist online model artifact for this symbol (latest block only)
+        if last_artifact is None and len(rows) >= 10:
+            # Fallback: build an artifact from the available history
+            train_rows = rows[:-1] if len(rows) > 1 else rows
+            features = _select_features(train_rows, min_cov)
+            if features:
+                stats_fallback, X_train_fb, _ = _fit_iforest_train_matrix(train_rows, features, clip_low, clip_high)
+                train_scores_fb, _ = _iforest_scores(X_train_fb, X_train_fb, if_defaults, random_state)
+                thr_fb = _quantile(train_scores_fb, threshold_q)
+                last_artifact = {
+                    "features": features,
+                    "stats": stats_fallback,
+                    "threshold": float(thr_fb),
+                    "params": if_defaults,
+                    "block_start": int(rows[-1].get("ts") or 0),
+                    "window_start": int(rows[0].get("ts") or 0),
+                }
+        if last_artifact is not None:
+            models_dir = out_root / "models"
+            model_obj = None
+            try:
+                # Try to fit full model on train data for persistence
+                params = last_artifact.get("params", {})
+                stats = last_artifact.get("stats")
+                features_list = last_artifact.get("features") or []
+                if stats and features_list:
+                    # Recompute X_train to persist model (best-effort)
+                    train_rows_full = [r for r in rows if (r.get("ts") or 0) >= last_artifact["window_start"] and (r.get("ts") or 0) < last_artifact["block_start"]]
+                    if len(train_rows_full) >= 10:
+                        stats2, X_train2, _ = _fit_iforest_train_matrix(train_rows_full, features_list, clip_low, clip_high)
+                        from sklearn.ensemble import IsolationForest  # type: ignore
+
+                        eff_params = {k: v for k, v in params.items() if k in {"n_estimators", "max_samples", "max_features", "contamination", "bootstrap", "n_jobs"}}
+                        model_obj = IsolationForest(random_state=random_state, **eff_params)
+                        model_obj.fit(X_train2)
+                        # Use stats2 for persistence
+                        last_artifact["stats"] = stats2
+            except Exception:
+                model_obj = None
+            _save_online_artifact(
+                models_dir,
+                sym,
+                features=last_artifact["features"],
+                stats=last_artifact["stats"],
+                threshold=float(last_artifact["threshold"]),
+                model_obj=model_obj,
+                meta={
+                    "block_start": last_artifact["block_start"],
+                    "window_start": last_artifact["window_start"],
+                    "random_state": random_state,
+                },
+            )
 
         # Labels and metrics
         # Build a map ts->close
@@ -361,11 +469,167 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
     return metrics
 
 
+def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path) -> Dict[str, Any]:
+    """Score only the latest row per symbol using persisted online artifacts.
+
+    Appends to scores and updates alerts incrementally. Skips symbols without artifacts.
+    """
+    model_dir = out_root / "models"
+    alerts_dir = out_root / "alerts"
+    scores_dir = out_root / "scores"
+    alerts_dir.mkdir(parents=True, exist_ok=True)
+    scores_dir.mkdir(parents=True, exist_ok=True)
+
+    model_cfg = (cfg.get("model") or {})
+    alerts_cfg = (cfg.get("alerts") or {})
+    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
+    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
+
+    summary: Dict[str, Any] = {"symbols": {}, "appended_scores": 0, "new_alerts": 0}
+
+    for sym in eff.symbols:
+        art = _load_online_artifact(model_dir, sym)
+        if not art:
+            continue
+        # Load latest row from features
+        feat_fp = features_root / sym / "features_5m.csv"
+        rows = _read_csv_features(feat_fp)
+        if not rows:
+            continue
+        rows.sort(key=lambda r: (r.get("ts") or 0))
+        latest = rows[-1]
+        ts = int(latest.get("ts") or 0)
+        sco_fp = scores_dir / f"{sym}.csv"
+        # Skip if this ts already scored
+        if sco_fp.exists():
+            try:
+                with sco_fp.open("r", encoding="utf-8") as f:
+                    import csv as _csv
+
+                    rdr = _csv.DictReader(f)
+                    last_ts = None
+                    for r in rdr:
+                        try:
+                            last_ts = int(r.get("ts") or 0)
+                        except Exception:
+                            continue
+                    if last_ts == ts:
+                        continue
+            except Exception:
+                pass
+
+        # Transform latest row using persisted stats
+        features_list: List[str] = list(art.get("features") or [])
+        stats_list: List[RobustStats] = []
+        for s in (art.get("stats") or []):
+            try:
+                stats_list.append(RobustStats(float(s["median"]), float(s["q1"]), float(s["q3"]), float(s["low"]), float(s["high"])) )
+            except Exception:
+                pass
+        x_row = []
+        for i, k in enumerate(features_list):
+            v = float(latest.get(k)) if isinstance(latest.get(k), (int, float)) else math.nan
+            st = stats_list[i] if i < len(stats_list) else RobustStats(0.0, -1.0, 1.0, -3.0, 3.0)
+            x_row.append(_scale_value(v, st))
+
+        # Score using model if available, else fallback aggregator
+        model = art.get("_model")
+        score_val: float
+        try:
+            if model is not None and hasattr(model, "decision_function"):
+                score_val = -float(model.decision_function([x_row])[0])
+            else:
+                score_val = float(sum(abs(v) for v in x_row))
+        except Exception:
+            score_val = float(sum(abs(v) for v in x_row))
+        threshold = float(art.get("threshold", math.nan))
+
+        # Append to scores CSV
+        try:
+            import csv as _csv
+
+            write_header = not sco_fp.exists()
+            with sco_fp.open("a", newline="", encoding="utf-8") as f:
+                w = _csv.writer(f)
+                if write_header:
+                    w.writerow(["ts", "symbol", "score", "threshold"])
+                w.writerow([ts, sym, score_val, threshold])
+            summary["appended_scores"] += 1
+        except Exception:
+            continue
+
+        # Recompute alerts state efficiently from scores
+        try:
+            with sco_fp.open("r", encoding="utf-8") as f:
+                import csv as _csv
+
+                rdr = list(_csv.DictReader(f))
+        except Exception:
+            rdr = []
+        tier = _symbol_tier(cfg, sym)
+        confirm_k = int((confirm_map.get(tier) if isinstance(confirm_map, Mapping) else None) or confirm_map.get("default", 2))
+        ge_count = 0
+        cooldown = 0
+        pre_alert = None
+        storm_alert = None
+        for r in rdr:
+            try:
+                t = int(r.get("ts") or 0)
+                s = float(r.get("score") or math.nan)
+                thr = float(r.get("threshold") or math.nan)
+            except Exception:
+                continue
+            if isinstance(s, float) and isinstance(thr, float) and not math.isnan(s) and not math.isnan(thr) and s >= thr:
+                ge_count += 1
+            else:
+                ge_count = 0
+            if ge_count == persist_k:
+                pre_alert = {"ts": t, "symbol": sym, "kind": "pre_alert", "score": s, "threshold": thr}
+            if cooldown > 0:
+                cooldown -= 1
+            elif ge_count == confirm_k:
+                storm_alert = {"ts": t, "symbol": sym, "kind": "storm", "score": s, "threshold": thr}
+                cooldown = cooldown_bars
+
+        # Append only latest alerts to alerts CSV
+        al_fp = alerts_dir / f"{sym}.csv"
+        if pre_alert or storm_alert:
+            try:
+                import csv as _csv
+
+                write_header = not al_fp.exists()
+                existing: set[Tuple[int, str]] = set()
+                if al_fp.exists():
+                    with al_fp.open("r", encoding="utf-8") as f:
+                        rdr2 = _csv.DictReader(f)
+                        for r in rdr2:
+                            try:
+                                existing.add((int(r.get("ts") or 0), str(r.get("kind") or "")))
+                            except Exception:
+                                continue
+                with al_fp.open("a", newline="", encoding="utf-8") as f:
+                    w = _csv.DictWriter(f, fieldnames=["ts", "symbol", "kind", "score", "threshold"])
+                    if write_header:
+                        w.writeheader()
+                    for a in [pre_alert, storm_alert]:
+                        if a and (a["ts"], a["kind"]) not in existing:
+                            w.writerow(a)
+                            summary["new_alerts"] += 1
+            except Exception:
+                pass
+
+        summary["symbols"][sym] = {"ts": ts, "score": score_val, "threshold": threshold}
+
+    return summary
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm backtest (walk-forward)")
     parser.add_argument("config", type=str)
     parser.add_argument("--features", type=str, default="features")
     parser.add_argument("--artifacts-root", type=str, help="Override artifacts root; defaults to run.artifacts_root/run_id")
+    parser.add_argument("--online", action="store_true", help="Score only latest row using persisted artifacts (no retrain)")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -378,8 +642,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     artifacts_root = Path(args.artifacts_root) if args.artifacts_root else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
     artifacts_root.mkdir(parents=True, exist_ok=True)
 
-    run_backtest(cfg, eff, features_root=Path(args.features), out_root=artifacts_root)
-    print(f"Backtest artifacts written to {artifacts_root}")
+    if args.online:
+        summary = score_online(cfg, eff, features_root=Path(args.features), out_root=artifacts_root)
+        print(json.dumps({"online_summary": summary}))
+    else:
+        run_backtest(cfg, eff, features_root=Path(args.features), out_root=artifacts_root)
+        print(f"Backtest artifacts written to {artifacts_root}")
     return 0
 
 

@@ -7,6 +7,7 @@ import random
 import time
 from pathlib import Path
 from typing import Optional
+import json
 
 from ..config import load_config, validate_config, EffectiveConfig
 from ..retrieve.coinglass import run_retrieve
@@ -100,6 +101,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--log-level", type=str, default="INFO")
     parser.add_argument("--send-telegram", action="store_true")
     parser.add_argument("--telegram-kinds", type=str, default="storm")
+    parser.add_argument("--online-scoring", action="store_true", help="Use online scoring (no retrain) if artifacts present")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -118,7 +120,45 @@ def main(argv: Optional[list[str]] = None) -> int:
     artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
 
     if args.once:
-        run_once(cfg, eff, data_root=data_root, features_root=features_root, artifacts_root=artifacts_root, send_telegram=args.send_telegram, telegram_kinds=args.telegram_kinds)
+        _cycle_start = time.monotonic()
+        bar_ts = _align_to_5m_close(_utc_now_ms())
+        # Timings
+        t0 = time.monotonic()
+        _retrieve_once(cfg, eff, data_root=data_root)
+        t1 = time.monotonic()
+        update_features_last(eff, data_root=data_root, out_root=features_root)
+        t2 = time.monotonic()
+        if args.online_scoring:
+            from ..backtest.engine import score_online
+
+            score_online(cfg, eff, features_root=features_root, out_root=artifacts_root)
+        else:
+            run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root)
+        t3 = time.monotonic()
+        # Optional alerts
+        if args.send_telegram:
+            from ..notify.telegram import main as telegram_main
+
+            try:
+                telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
+            except Exception:
+                pass
+        # SLO metrics
+        slo = {
+            "ts": int(time.time()),
+            "bar_ts": int(bar_ts / 1000),
+            "scheduler_lag_s": max(0.0, (time.monotonic() - _cycle_start)),
+            "retrieve_ms": int((t1 - t0) * 1000),
+            "feature_ms": int((t2 - t1) * 1000),
+            "score_ms": int((t3 - t2) * 1000),
+            "mode": ("online" if args.online_scoring else "train"),
+        }
+        try:
+            mdir = artifacts_root / "metrics"
+            mdir.mkdir(parents=True, exist_ok=True)
+            (mdir / "realtime.jsonl").open("a", encoding="utf-8").write(json.dumps(slo) + "\n")
+        except Exception:
+            pass
         return 0
 
     LOG = logging.getLogger("cryptostorm.realtime")
@@ -130,7 +170,42 @@ def main(argv: Optional[list[str]] = None) -> int:
         if now < target:
             _sleep_until(target, args.jitter_s)
         try:
-            run_once(cfg, eff, data_root=data_root, features_root=features_root, artifacts_root=artifacts_root, send_telegram=args.send_telegram, telegram_kinds=args.telegram_kinds)
+            _cycle_start = time.monotonic()
+            # Step timings
+            t0 = time.monotonic()
+            _retrieve_once(cfg, eff, data_root=data_root)
+            t1 = time.monotonic()
+            update_features_last(eff, data_root=data_root, out_root=features_root)
+            t2 = time.monotonic()
+            if args.online_scoring:
+                from ..backtest.engine import score_online
+
+                score_online(cfg, eff, features_root=features_root, out_root=artifacts_root)
+            else:
+                run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root)
+            t3 = time.monotonic()
+            if args.send_telegram:
+                from ..notify.telegram import main as telegram_main
+
+                try:
+                    telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
+                except Exception:
+                    pass
+            slo = {
+                "ts": int(time.time()),
+                "bar_ts": int(bar_ts / 1000),
+                "scheduler_lag_s": max(0.0, (time.monotonic() - _cycle_start)),
+                "retrieve_ms": int((t1 - t0) * 1000),
+                "feature_ms": int((t2 - t1) * 1000),
+                "score_ms": int((t3 - t2) * 1000),
+                "mode": ("online" if args.online_scoring else "train"),
+            }
+            try:
+                mdir = artifacts_root / "metrics"
+                mdir.mkdir(parents=True, exist_ok=True)
+                (mdir / "realtime.jsonl").open("a", encoding="utf-8").write(json.dumps(slo) + "\n")
+            except Exception:
+                pass
         except Exception as e:  # noqa: BLE001
             LOG.warning("Realtime cycle failed: %s", e)
         # Sleep until next bar's offset

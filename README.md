@@ -111,6 +111,17 @@
   - Sidecar is updated after each cycle; first run falls back to scanning JSONL for `last_ts`.
   - Combine with Phase 1 realtime to build features/alerts after retrieve.
 
+## Realtime (Phase 3)
+- Online scoring (no retrain):
+  - Create model artifacts once (offline or scheduled):
+    - `PYTHONPATH=src python -m cryptostorm backtest configs/example.yaml --features features --artifacts-root artifacts/<RUN_ID>`
+  - Append a new features row (per Phase 1).
+  - Score latest row only:
+    - `PYTHONPATH=src python -m cryptostorm backtest configs/example.yaml --features features --artifacts-root artifacts/<RUN_ID> --online`
+- Realtime loop with online scoring + SLO metrics:
+  - `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --online-scoring`
+  - Writes per-cycle SLOs to `artifacts/<RUN_ID>/metrics/realtime.jsonl` (scheduler_lag_s, durations, mode).
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather
