@@ -199,6 +199,16 @@ def _path_is_v4(path: str) -> bool:
     return any(path.startswith(p) for p in v4_patterns)
 
 
+def _path_is_v3(path: str) -> bool:
+    v3_patterns = (
+        "/api/price/ohlc-history",
+        "/api/futures/openInterest/ohlc-history",
+        "/api/futures/liquidation/history",
+        "/api/futures/aggregated-taker-buy-sell-volume/history",
+    )
+    return any(path.startswith(p) for p in v3_patterns)
+
+
 def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapping[str, str], *, backoff_initial: float, backoff_max: float) -> Dict[str, Any]:
     import urllib.parse
     import urllib.request
@@ -640,6 +650,7 @@ def run_retrieve(
     eff: EffectiveConfig,
     *,
     base_url: str,
+    v3_base_url: Optional[str],
     exchange: str,
     quote: str,
     page_limit: int,
@@ -675,6 +686,7 @@ def run_retrieve(
             f"API key missing; set {eff.api_key_env} or provide acquisition.coinglass.api_key_file"
         )
     headers = _default_headers(api_key or "")
+    v3_host = (v3_base_url or "https://open-api.coinglass.com").rstrip("/")
 
     # Iterate datasets based on config enable flags
     ds_items = list(eff.datasets.items())
@@ -748,12 +760,13 @@ def run_retrieve(
                 orderbook_time_enum=orderbook_time_enum,
             )
 
-            def fetch_all(path: str) -> List[Mapping[str, Any]]:
+            def fetch_all(path: str, host: Optional[str] = None) -> List[Mapping[str, Any]]:
                 if dry_run:
                     LOG.info("DRY-RUN: GET %s params=%s", path, params)
                     return []
                 # Use time-slicing for v4 when configured; otherwise use paging
-                if slice_days and path.startswith("/api/") and "open-interest/ohlc-history" not in path and "price/ohlc-history" not in path:
+                target_base = (host or base_url)
+                if slice_days and _path_is_v4(path):
                     slice_ms = slice_days * 24 * 60 * 60 * 1000
                     # Align the slice edges to the interval grid as well to avoid off-grid boundaries
                     step_ms_local = _canonical_interval_ms(ds_key, interval) or slice_ms
@@ -762,7 +775,7 @@ def run_retrieve(
                     if s0 >= e0:
                         return []
                     return _fetch_time_sliced(
-                        base_url=base_url,
+                        base_url=target_base,
                         headers=headers,
                         path=path,
                         params={**params, "startTime": s0, "endTime": e0},
@@ -773,7 +786,7 @@ def run_retrieve(
                 else:
                     return list(
                         _page_iter(
-                            base_url,
+                            target_base,
                             headers,
                             path,
                             params,
@@ -794,7 +807,8 @@ def run_retrieve(
                 elif ds_key == "liquidation_5m":
                     used_path = "/api/futures/liquidation/history"
             try:
-                items = fetch_all(used_path)
+                host_for_used = (v3_host if _path_is_v3(used_path) else base_url)
+                items = fetch_all(used_path, host=host_for_used)
                 if not items and fallback:
                     # Log additional context for debugging
                     _params_preview = {
@@ -825,7 +839,8 @@ def run_retrieve(
                             "symbol": sym,
                             "exchange": exchange,
                         }
-                    items = fetch_all(fallback)
+                    host_for_fb = (v3_host if _path_is_v3(fallback) else base_url)
+                    items = fetch_all(fallback, host=host_for_fb)
                 # No timeEnum retries for orderbook on v4; rely on interval=5m and time window
             except Exception as e:  # noqa: BLE001
                 if fallback:
@@ -838,7 +853,8 @@ def run_retrieve(
                             "symbol": sym,
                             "exchange": exchange,
                         }
-                    items = fetch_all(fallback)
+                    host_for_fb = (v3_host if _path_is_v3(fallback) else base_url)
+                    items = fetch_all(fallback, host=host_for_fb)
                 else:
                     raise
 

@@ -163,6 +163,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         acq = cfg.get("acquisition", {})
         cg = (acq or {}).get("coinglass", {})
         base_url = cg.get("base_url", "https://open-api-v4.coinglass.com")
+        v3_base_url = cg.get("v3_base_url", "https://open-api.coinglass.com")
         exchange = cg.get("exchange", "binance")
         quote = cg.get("quote", "USDT")
         paging = cg.get("paging", {})
@@ -173,6 +174,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         run_retrieve(
             eff,
             base_url=base_url,
+            v3_base_url=v3_base_url,
             exchange=exchange,
             quote=quote,
             page_limit=page_limit,
