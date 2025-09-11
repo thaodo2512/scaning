@@ -28,7 +28,7 @@ services:
       - PYTHONPATH=/app/src
     volumes:
       - ./:/app
-    command: ["python", "-m", "cryptostorm", "api", "configs/realtime.yaml", "--data", "data", "--features", "features", "--reports", "reports", "--host", "0.0.0.0", "--port", "8000"]
+    command: ["python", "-m", "cryptostorm", "api", "configs/realtime.yaml", "--data", "data", "--features", "features", "--reports", "reports", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -43,4 +43,3 @@ services:
     command: ["python", "-m", "cryptostorm", "monitor", "configs/realtime.yaml", "--data", "data", "--features", "features", "--symbols", "20", "--view", "alerts"]
     stdin_open: true
     tty: true
-

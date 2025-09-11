@@ -157,6 +157,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--reports", type=str, default="reports")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--reload", action="store_true", help="Auto-reload on code changes (dev)")
     parser.add_argument("--token", type=str, default=None, help="Bearer token for auth (optional)")
     args = parser.parse_args(argv)
 
@@ -174,10 +175,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         import uvicorn  # type: ignore
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("uvicorn is required to run the server: pip install uvicorn") from exc
-    uvicorn.run(app, host=args.host, port=int(args.port))
+    uvicorn.run(app, host=args.host, port=int(args.port), reload=bool(args.reload))
     return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
