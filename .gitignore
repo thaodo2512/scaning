@@ -29,9 +29,18 @@ coverage.xml
 htmlcov/
 
 # Project outputs
-data/
+data/*
 artifacts/
 reports/
+features/
+parquet/
+ddl/
+
+# Optional local assets/bundles
+vendor/
+
+# Data files
+*.parquet
 
 # Secrets and local env
 secrets/
@@ -46,4 +55,3 @@ secrets/
 
 # Logs
 *.log
-features/

@@ -88,6 +88,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--log-level", type=str, default="INFO")
     p_rt.add_argument("--send-telegram", action="store_true")
     p_rt.add_argument("--telegram-kinds", type=str, default="storm")
+    p_rt.add_argument("--online-scoring", action="store_true")
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)
@@ -223,6 +224,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--once"]
         if args.send_telegram:
             argv += ["--send-telegram", "--telegram-kinds", args.telegram_kinds]
+        if args.online_scoring:
+            argv += ["--online-scoring"]
         return realtime_main(argv)
 
     if args.cmd == "api":

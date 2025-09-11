@@ -119,11 +119,12 @@ SETTINGS index_granularity = 8192;
         "ts DateTime64(3)",
         "symbol LowCardinality(String)",
     ] + [f"{c} Float64" for c in cols if c not in ("ts", "symbol")]
+    col_defs_join = ",\n  ".join(col_defs)
     parts.append(
         f"""
 DROP TABLE IF EXISTS features_5m;
 CREATE TABLE features_5m (
-  {',\n  '.join(col_defs)}
+  {col_defs_join}
 ) ENGINE = MergeTree
 PARTITION BY toYYYYMM(ts)
 ORDER BY (symbol, ts)
@@ -160,11 +161,12 @@ CREATE INDEX IF NOT EXISTS on_{tname}_ts_sym ON {tname} (symbol, ts DESC);
         "ts TIMESTAMPTZ",
         "symbol TEXT",
     ] + [f"{c} DOUBLE PRECISION" for c in cols if c not in ("ts", "symbol")]
+    fdefs_join = ",\n  ".join(fdefs)
     parts.append(
         f"""
 DROP TABLE IF EXISTS features_5m CASCADE;
 CREATE TABLE features_5m (
-  {',\n  '.join(fdefs)}
+  {fdefs_join}
 );
 SELECT create_hypertable('features_5m', by_range('ts'), if_not_exists => TRUE);
 CREATE INDEX IF NOT EXISTS on_features_5m_ts_sym ON features_5m (symbol, ts DESC);
@@ -215,4 +217,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

@@ -102,6 +102,12 @@
 - Incremental feature append (without full rebuild):
   - `PYTHONPATH=src python -m cryptostorm feature configs/example.yaml --data data --out features --update-last`
 
+## End-to-End Realtime
+- Convenience script to run realtime once (validate → realtime → report):
+  - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once`
+- Continuous watch (5m-aligned loop), with Telegram alerts:
+  - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2`
+
 ## Realtime (Phase 2)
 - Retrieve watch mode with parallel workers and global RPS limiter:
   - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2`
