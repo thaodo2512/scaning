@@ -61,9 +61,13 @@
   - `alerts/<SYM>.csv`, `scores/<SYM>.csv`, `metrics/metrics.json`.
 
 ## Report (Item 5)
-- Full report (Lightweight Charts) — price, score, OI/liqs:
-  - `PYTHONPATH=src python -m cryptostorm report configs/example.yaml --data data --features features --out reports`
-  - Opens offline; to inline the charting lib without CDN, drop `lightweight-charts.standalone.production.js` at `vendor/` or `reports/vendor/`.
+- Full report — choose charting engine:
+  - Lightweight Charts (default): price, score, OI/liqs
+    - `PYTHONPATH=src python -m cryptostorm report configs/example.yaml --data data --features features --out reports`
+    - Offline: place `lightweight-charts.standalone.production.js` in `vendor/` or `reports/vendor/`.
+  - Plotly (no Lightweight Charts): price (candlestick), score, OI+liq
+    - `PYTHONPATH=src python -m cryptostorm report-plotly configs/example.yaml --data data --out reports`
+    - Offline: place `plotly-2.32.0.min.js` in `vendor/` or `reports/vendor/`.
 
 - Interactive price+alerts (Plotly) — price line + alert markers only:
   - `PYTHONPATH=src python -m cryptostorm report-price configs/example.yaml --data data --out reports`

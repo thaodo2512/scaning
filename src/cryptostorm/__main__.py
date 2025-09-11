@@ -12,6 +12,7 @@ from .feature.engine import main as feature_main
 from .backtest.engine import main as backtest_main
 from .report.engine import main as report_main
 from .report.price_alert import main as price_alert_main
+from .report.plotly_full import main as plotly_full_main
 from .notify.telegram import main as telegram_notify_main
 from .realtime.engine import main as realtime_main
 from .api.server import main as api_main
@@ -68,6 +69,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rep2.add_argument("--data", type=str, default="data")
     p_rep2.add_argument("--artifacts", type=str)
     p_rep2.add_argument("--out", type=str, default="reports")
+
+    p_rep3 = sub.add_parser("report-plotly", help="Generate full Plotly reports (candles, score, OI+liq)")
+    p_rep3.add_argument("config", type=str)
+    p_rep3.add_argument("--data", type=str, default="data")
+    p_rep3.add_argument("--artifacts", type=str)
+    p_rep3.add_argument("--out", type=str, default="reports")
 
     p_tel = sub.add_parser("alert-telegram", help="Send alerts to Telegram from artifacts/<RUN_ID>/alerts")
     p_tel.add_argument("config", type=str)
@@ -189,6 +196,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
         return price_alert_main(argv)
+    if args.cmd == "report-plotly":
+        argv = [args.config, "--data", args.data, "--out", args.out]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        return plotly_full_main(argv)
     if args.cmd == "alert-telegram":
         argv = [args.config]
         if args.artifacts:
