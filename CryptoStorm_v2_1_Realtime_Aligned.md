@@ -215,6 +215,27 @@ if score >= threshold and gates_ok:
 
 ---
 
-## 9) Outputs
-- `features/<SYM>.csv` now includes Flow & Share, Context flags, and `liq_notional_60m`.  
-- Artifacts directory contains model, scaler, threshold, and **manifest.json**. fileciteturn4file0
+## 9) Dashboard exporter (1‑day view)
+**Files written each bar**
+- `/ui/alerts_1d.json` → last 24 h alerts for all symbols:  
+  `[{ts, symbol, kind, score, tier}]`
+- `/ui/series/{SYMBOL}_1d.json` → last 24 h time series:  
+  `{candles:[{t,o,h,l,c,v}], score:[{t,s,thr}], oi:[{t,v}], liq:[{t,v,roll60}], funding:[{t,v}], basis:[{t,b60,b120}], gates:[{t,ok}]}`
+
+Payload size for 100 symbols is small (≈8–12 MB raw for 24 h). Serve statically; poll every 60–90 s. fileciteturn5file0
+
+**Minimal `ui/index.html`**
+```html
+<!doctype html><meta charset="utf-8">
+<div id="app"></div>
+<script>
+async function load(symbol){
+  const [series, alerts] = await Promise.all([
+    fetch(`/ui/series/${symbol}_1d.json`).then(r=>r.json()),
+    fetch(`/ui/alerts_1d.json`).then(r=>r.json())
+  ]);
+  // render with Lightweight Charts (omitted for brevity)
+}
+load("BTCUSDT");
+</script>
+```

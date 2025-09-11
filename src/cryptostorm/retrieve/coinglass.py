@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple
 import math
+import datetime as _dt
 
 from ..config import EffectiveConfig, load_config, validate_config
 
@@ -554,6 +555,51 @@ def _persist_jsonl(out_path: Path, items: Iterable[Mapping[str, Any]], *, symbol
     return written, skipped
 
 
+# -------------------------
+# Lightweight per-file state
+# -------------------------
+
+
+def _state_dir_for_symbol(out_dir: Path) -> Path:
+    return out_dir / ".state"
+
+
+def _state_path(out_dir: Path, ds_key: str) -> Path:
+    return _state_dir_for_symbol(out_dir) / f"{ds_key}.json"
+
+
+def _load_last_ts_state(out_dir: Path, ds_key: str, fallback_scan_file: bool, out_file: Optional[Path]) -> Optional[int]:
+    sp = _state_path(out_dir, ds_key)
+    try:
+        if sp.exists():
+            obj = json.loads(sp.read_text(encoding="utf-8") or "{}")
+            v = obj.get("last_ts")
+            if isinstance(v, (int, float)):
+                return int(v)
+    except Exception:
+        pass
+    if fallback_scan_file and out_file is not None:
+        return _max_saved_ts(out_file)
+    return None
+
+
+def _save_last_ts_state(out_dir: Path, ds_key: str, last_ts: int) -> None:
+    try:
+        sd = _state_dir_for_symbol(out_dir)
+        sd.mkdir(parents=True, exist_ok=True)
+        sp = _state_path(out_dir, ds_key)
+        tmp = sp.with_suffix(sp.suffix + ".tmp")
+        payload = {
+            "last_ts": int(last_ts),
+            "updated_at": _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        tmp.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(sp)
+    except Exception:
+        # best-effort
+        pass
+
+
 def run_retrieve(
     eff: EffectiveConfig,
     *,
@@ -620,7 +666,8 @@ def run_retrieve(
             out_dir = out_root / sym
             _ensure_dir(out_dir)
             out_file = out_dir / _output_filename(ds_key)
-            last_ts = _max_saved_ts(out_file)
+            # Load last_ts from sidecar state; fallback to file scan
+            last_ts = _load_last_ts_state(out_dir, ds_key, True, out_file)
             # Backfill mode: if time-slicing is enabled, ignore delta and fetch from base_start
             if slice_days and slice_days > 0:
                 start_ms_local = base_start_ms
@@ -768,6 +815,19 @@ def run_retrieve(
                 endpoint=used_path,
                 aggregated=aggregated,
             )
+            # Update sidecar last_ts based on items returned (best-effort)
+            try:
+                max_added_ts = None
+                for it in items:
+                    tsv = _infer_ts_ms(it)
+                    if isinstance(tsv, int):
+                        max_added_ts = tsv if (max_added_ts is None or tsv > max_added_ts) else max_added_ts
+                if isinstance(max_added_ts, int):
+                    cur = last_ts if isinstance(last_ts, int) else None
+                    if cur is None or max_added_ts > cur:
+                        _save_last_ts_state(out_dir, ds_key, max_added_ts)
+            except Exception:
+                pass
             LOG.info(
                 "saved %s: +%d (skipped %d) -> %s",
                 ds_key,
