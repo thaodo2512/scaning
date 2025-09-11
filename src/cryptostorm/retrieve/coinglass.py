@@ -20,6 +20,37 @@ LOG = logging.getLogger("cryptostorm.retrieve")
 _HTTP_DEBUG = os.getenv("CRYPTOSTORM_HTTP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
 
 
+# Optional global rate limiter (set by watch mode)
+class _RateLimiter:
+    def __init__(self, rps: float) -> None:
+        import threading
+
+        self.rps = max(0.1, float(rps))
+        self.lock = threading.Lock()
+        self.tokens = self.rps
+        self.last = time.monotonic()
+
+    def acquire(self) -> None:
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                elapsed = now - self.last
+                self.last = now
+                self.tokens = min(self.rps, self.tokens + elapsed * self.rps)
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return
+            time.sleep(0.01)
+
+
+_RPS_LIMITER: Optional[_RateLimiter] = None
+
+
+def set_rps_limiter(limiter: Optional[_RateLimiter]) -> None:
+    global _RPS_LIMITER
+    _RPS_LIMITER = limiter
+
+
 def _utc_now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -198,6 +229,11 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
     attempt = 0
     backoff = max(0.1, float(backoff_initial))
     while True:
+        if _RPS_LIMITER is not None:
+            try:
+                _RPS_LIMITER.acquire()
+            except Exception:
+                pass
         attempt += 1
         # Log the requested URL only when HTTP debug is enabled (env) or logger is in DEBUG
         try:

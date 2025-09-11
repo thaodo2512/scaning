@@ -102,6 +102,15 @@
 - Incremental feature append (without full rebuild):
   - `PYTHONPATH=src python -m cryptostorm feature configs/example.yaml --data data --out features --update-last`
 
+## Realtime (Phase 2)
+- Retrieve watch mode with parallel workers and global RPS limiter:
+  - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2`
+  - Uses per-file sidecar state at `data/<SYM>/.state/<dataset>.json` to fetch only deltas.
+  - Global rate limit applies to all HTTP calls across workers.
+- Notes:
+  - Sidecar is updated after each cycle; first run falls back to scanning JSONL for `last_ts`.
+  - Combine with Phase 1 realtime to build features/alerts after retrieve.
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather

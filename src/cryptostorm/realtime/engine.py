@@ -142,3 +142,128 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -------------------------
+# Watch mode for retrieve only (Phase 2)
+# -------------------------
+
+def _clone_eff_for_symbols(eff: EffectiveConfig, symbols: list[str]) -> EffectiveConfig:
+    # Shallow clone EffectiveConfig with limited symbols and symbol_to_coin subset
+    from dataclasses import replace
+
+    sub_map = {k: v for k, v in eff.symbol_to_coin.items() if k in symbols}
+    return replace(eff, symbols=list(symbols), symbol_to_coin=sub_map)
+
+
+class _RateLimiter:
+    def __init__(self, rps: float) -> None:
+        import threading
+
+        self.rps = max(0.1, float(rps))
+        self.lock = threading.Lock()
+        self.tokens = self.rps
+        self.last = time.monotonic()
+
+    def acquire(self) -> None:
+        while True:
+            with self.lock:
+                now = time.monotonic()
+                elapsed = now - self.last
+                self.last = now
+                self.tokens = min(self.rps, self.tokens + elapsed * self.rps)
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return
+            time.sleep(0.01)
+
+
+def _set_global_rps_limiter(limiter: Optional[_RateLimiter]) -> None:
+    # Pass the limiter into retrieve module so all HTTP calls respect it
+    try:
+        from ..retrieve import coinglass as _cg
+
+        _cg.set_rps_limiter(limiter)
+    except Exception:
+        pass
+
+
+def watch_retrieve(
+    cfg: dict,
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    rps: Optional[float],
+    workers: int,
+    poll_offset_s: float,
+    jitter_s: float,
+    once: bool,
+    log_level: str,
+) -> int:
+    import threading
+    import queue
+
+    logging.basicConfig(level=getattr(logging, log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    LOG = logging.getLogger("cryptostorm.watch")
+
+    limiter = _RateLimiter(rps) if isinstance(rps, (int, float)) and rps and rps > 0 else None
+    _set_global_rps_limiter(limiter)
+
+    def _cycle() -> None:
+        q: "queue.Queue[str]" = queue.Queue()
+        for s in eff.symbols:
+            q.put(s)
+
+        def _worker() -> None:
+            while True:
+                try:
+                    sym = q.get_nowait()
+                except Exception:
+                    break
+                try:
+                    eff2 = _clone_eff_for_symbols(eff, [sym])
+                    _retrieve_once(cfg, eff2, data_root=data_root)
+                except Exception as e:  # noqa: BLE001
+                    LOG.warning("worker retrieve failed for %s: %s", sym, e)
+                finally:
+                    try:
+                        q.task_done()
+                    except Exception:
+                        pass
+
+        threads: list[threading.Thread] = []
+        for _ in range(max(1, workers)):
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
+            threads.append(t)
+        for t in threads:
+            t.join()
+
+    def _sleep_until(target_ms: int) -> None:
+        now = _utc_now_ms()
+        delay = max(0, target_ms - now)
+        if jitter_s and jitter_s > 0:
+            delay += int(random.uniform(0, float(jitter_s)) * 1000)
+        if delay > 0:
+            time.sleep(delay / 1000.0)
+
+    if once:
+        _cycle()
+        return 0
+
+    LOG.info("retrieve --watch started: workers=%d rps=%s offset=%.1fs jitter≤%.1fs", workers, (rps or "-"), poll_offset_s, jitter_s)
+    while True:
+        now = _utc_now_ms()
+        bar_ts = _align_to_5m_close(now)
+        target = bar_ts + int(poll_offset_s * 1000)
+        if now < target:
+            _sleep_until(target)
+        try:
+            _cycle()
+        except Exception as e:  # noqa: BLE001
+            LOG.warning("watch cycle failed: %s", e)
+        # Sleep to next bar offset
+        next_target = _align_to_5m_close(_utc_now_ms()) + 5 * 60 * 1000 + int(poll_offset_s * 1000)
+        _sleep_until(next_target)
+
+    return 0

@@ -30,6 +30,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_ret.add_argument("--dry-run", action="store_true")
     p_ret.add_argument("--log-level", type=str, default="INFO")
     p_ret.add_argument("--slice-days", type=int, default=None)
+    # Watch mode (realtime retrieve only)
+    p_ret.add_argument("--watch", action="store_true")
+    p_ret.add_argument("--poll-offset-s", type=float, default=10.0)
+    p_ret.add_argument("--jitter-s", type=float, default=2.0)
+    p_ret.add_argument("--rps", type=float, default=None)
+    p_ret.add_argument("--workers", type=int, default=1)
+    p_ret.add_argument("--once", action="store_true")
 
     p_aud = sub.add_parser("audit", help="Audit data coverage for the 30d window")
     p_aud.add_argument("config", type=str)
@@ -98,6 +105,20 @@ def main(argv: Optional[list[str]] = None) -> int:
             for e in errs:
                 logging.getLogger("cryptostorm").error(e)
             return 2
+        # Watch mode: parallel, rate-limited retrieve only
+        if args.watch:
+            from .realtime.engine import watch_retrieve
+            return watch_retrieve(
+                cfg,
+                eff,
+                data_root=Path(args.out),
+                rps=(float(args.rps) if args.rps is not None else None),
+                workers=max(1, int(args.workers)),
+                poll_offset_s=float(args.poll_offset_s),
+                jitter_s=float(args.jitter_s),
+                once=bool(args.once),
+                log_level=args.log_level,
+            )
         acq = cfg.get("acquisition", {})
         cg = (acq or {}).get("coinglass", {})
         base_url = cg.get("base_url", "https://open-api-v4.coinglass.com")
