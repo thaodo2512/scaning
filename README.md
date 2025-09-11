@@ -174,6 +174,21 @@
 - Report generators now write a lightweight `index.html` under the reports directory.
 - The realtime loop with `--build-reports` also refreshes `index.html` each cycle.
 
+## Docker Usage
+- Build images once:
+  - `docker compose build`
+- Continuous realtime (updates reports every 5m; default price+alerts reports):
+  - `COINGLASS_API_KEY=... docker compose up realtime`
+  - Open `reports/index.html`
+  - Tail logs: `docker compose logs -f realtime`
+  - Background mode: `docker compose up -d realtime`
+- One‑shot (single cycle + reports):
+  - `COINGLASS_API_KEY=... docker compose run --rm backfill`
+  - Open `reports/index.html`
+- Optional services:
+  - API: `docker compose up api` (http://localhost:8000)
+  - Monitor (console): `docker compose run --rm monitor`
+
 ## Telegram Alerts (Optional)
 - Create a bot and obtain credentials:
   - `TELEGRAM_BOT_TOKEN` from BotFather
