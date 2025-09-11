@@ -24,7 +24,7 @@ Options:
       --build-reports        Build reports after each realtime cycle and update index.html
       --ensure-data          Audit 30d coverage and backfill missing raw data
       --ensure-min-ratio <r> Coverage threshold for ensure step (default: 0.95)
-      --ensure-workers <n>   Workers for ensure backfill (default: 8)
+      --ensure-workers <n>   Workers for ensure backfill (default: 1)
       --ensure-rps <x>       Global RPS limit for ensure backfill (default: 3)
       --monitor              Launch console monitor after realtime step
       --monitor-view <v>     Monitor view: data|alerts (default: alerts)
@@ -55,7 +55,7 @@ REPORT_ENGINE="price"
 BUILD_REPORTS="0"
 ENSURE_DATA="0"
 ENSURE_MIN_RATIO="0.95"
-ENSURE_WORKERS="8"
+ENSURE_WORKERS="1"
 ENSURE_RPS="3"
 MONITOR="0"
 MONITOR_VIEW="alerts"
