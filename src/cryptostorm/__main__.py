@@ -127,6 +127,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_mon.add_argument("--datasets", type=str, default="futures_ohlcv_5m,oi_5m_ohlc,orderbook_futures_5m")
     p_mon.add_argument("--symbols", type=int, default=20)
     p_mon.add_argument("--refresh-s", type=float, default=2.0)
+    p_mon.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
 
     args = parser.parse_args(argv)
 
@@ -296,6 +297,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "--datasets", args.datasets,
             "--symbols", str(args.symbols),
             "--refresh-s", str(args.refresh_s),
+            "--view", args.view,
         ]
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
