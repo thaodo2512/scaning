@@ -8,7 +8,7 @@ services:
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --report-engine plotly"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --build-reports"]
 
   realtime:
     build: .
@@ -18,7 +18,7 @@ services:
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports"]
     restart: unless-stopped
 
   api:
