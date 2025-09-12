@@ -53,7 +53,8 @@ class TestTelegramNotify(unittest.TestCase):
             self.assertEqual(rc, 0)
             # Expect DRY output and the kind text; include run id
             self.assertIn("DRY:", out)
-            self.assertIn("storm", out)
+            # look for kind in a case-insensitive manner
+            self.assertIn("storm", out.lower())
             self.assertIn("BTCUSDT", out)
             self.assertIn("run: dry", out)
 

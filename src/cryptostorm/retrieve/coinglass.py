@@ -659,7 +659,7 @@ def run_retrieve(
     eff: EffectiveConfig,
     *,
     base_url: str,
-    v3_base_url: Optional[str],
+    v3_base_url: Optional[str] = None,
     exchange: str,
     quote: str,
     page_limit: int,
