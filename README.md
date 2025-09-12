@@ -168,6 +168,10 @@
   - Uses Binance Futures API (`/fapi/v1/klines` 1d, last 30) and `/fapi/v1/ticker/24hr` to rank symbols.
   - `--rps` controls pacing (default 5 req/s). Omit `--out` to just print JSON.
 
+- AI‑assisted ranking (optional):
+  - `OPENAI_API_KEY=... PYTHONPATH=src python -m cryptostorm binance-top --top 100 --ai --openai-model gpt-4o-mini --out configs/realtime.yaml --print`
+  - The tool fetches objective metrics (30d/24h quote volume, 30d return, 30d realized volatility) and asks the model to pick the “most interesting” set from candidates. Output remains deterministic if the AI call fails (falls back to volume ranking).
+
 ## Console Monitor (TUI)
 - Text dashboard to monitor freshness and SLOs:
   - `PYTHONPATH=src python -m cryptostorm monitor configs/top.yaml --data data --features features --symbols 20 --refresh-s 2`
