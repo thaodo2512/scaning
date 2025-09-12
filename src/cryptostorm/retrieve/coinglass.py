@@ -507,9 +507,14 @@ def _fetch_time_sliced(
         got = _extract_items(resp)
         LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
         items.extend(got)
-        # Gentle pacing only when no global limiter is present; keep it minimal
+        # Gentle pacing only when no global limiter is present; allow disabling via env
         if _RPS_LIMITER is None:
-            time.sleep(0.05)
+            try:
+                no_delay = os.getenv("CRYPTOSTORM_NO_SLICE_DELAY", "").lower() in {"1", "true", "yes", "on"}
+            except Exception:
+                no_delay = False
+            if not no_delay:
+                time.sleep(0.05)
     return items
 
 

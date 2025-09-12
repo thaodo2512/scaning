@@ -74,7 +74,8 @@ def _sum_30d_quote_volume(symbol: str, rps_delay_s: float) -> Tuple[float, float
     except Exception:
         pass
 
-    time.sleep(max(0.0, rps_delay_s))
+    if rps_delay_s > 0:
+        time.sleep(rps_delay_s)
 
     # 30d daily klines (limit 30)
     try:
@@ -121,13 +122,14 @@ def select_top_binance_perps(top: int, *, rps: float = 5.0) -> List[RankRow]:
     symbols = _futures_usdt_perp_symbols()
     if not symbols:
         return []
-    delay = 1.0 / max(1.0, float(rps))
+    delay = 0.0 if float(rps) <= 0 else 1.0 / float(rps)
     rows: List[RankRow] = []
     for i, sym in enumerate(symbols):
         vol30, vol24, ret30, rv30 = _sum_30d_quote_volume(sym, delay)
         rows.append(RankRow(sym, vol30, vol24, ret30, rv30))
         # basic pacing
-        time.sleep(max(0.0, delay))
+        if delay > 0:
+            time.sleep(delay)
     rows.sort(key=lambda r: (r.vol30d_quote, r.vol24h_quote), reverse=True)
     return rows[: max(1, int(top))]
 
