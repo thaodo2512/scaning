@@ -127,6 +127,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--only-new", action="store_true", help="Send only alerts not seen before (persist registry)")
     parser.add_argument("--dry-run", action="store_true", help="Do not send, just print")
     parser.add_argument("--include-json", action="store_true", help="Append a compact one-line JSON context for AI copy/paste")
+    parser.add_argument("--limit", type=int, default=None, help="Max alerts to send this run (newest with storm priority)")
+    parser.add_argument("--cooldown-min", type=int, default=None, help="Per-symbol cooldown minutes (skip alerts sent recently)")
 
     args = parser.parse_args(argv)
 
@@ -168,6 +170,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
     eff_only_new = bool(args.only_new or bool(tg_cfg.get("only_new")))
     eff_include_json = bool(args.include_json or bool(tg_cfg.get("include_json")))
+    eff_limit = int(args.limit) if args.limit is not None else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) else None)
+    eff_cooldown_min = int(args.cooldown_min) if args.cooldown_min is not None else (int(tg_cfg.get("cooldown_min")) if isinstance(tg_cfg.get("cooldown_min"), (int, float)) else None)
 
     if not eff_dry and (not token or not chat_id):
         print("error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or *_FILE)")
@@ -178,19 +182,35 @@ def main(argv: Optional[List[str]] = None) -> int:
         print("No alerts to send.")
         return 0
 
-    # Dedup registry
+    # Dedup registry (also used for cooldown metadata)
     sent_reg_path = artifacts_root / "alerts" / "telegram_sent.json"
-    sent = _load_sent_registry(sent_reg_path) if eff_only_new else {}
+    sent = _load_sent_registry(sent_reg_path) if (eff_only_new or eff_cooldown_min) else {}
+    meta = {}
+    try:
+        meta = dict(sent.get("_meta", {})) if isinstance(sent, dict) else {}
+    except Exception:
+        meta = {}
+    last_by_symbol = {}
+    try:
+        last_by_symbol = dict(meta.get("last_symbol_ts", {})) if isinstance(meta, dict) else {}
+    except Exception:
+        last_by_symbol = {}
 
-    sent_now = 0
+    # First pass: build candidate list with only-new and cooldown filtering
+    cooldown_ms = int(eff_cooldown_min) * 60 * 1000 if isinstance(eff_cooldown_min, int) and eff_cooldown_min > 0 else None
+    candidates: List[dict] = []
     for r in rows:
         try:
             sym = str(r.get("symbol") or "")
             ts = int(r.get("ts") or 0)
             kind = str(r.get("kind") or "pre_alert")
             key = f"{sym}:{kind}:{ts}"
-            if args.only_new and sent.get(key):
+            if eff_only_new and isinstance(sent, dict) and sent.get(key):
                 continue
+            if cooldown_ms is not None:
+                last_ts = last_by_symbol.get(sym)
+                if isinstance(last_ts, (int, float)) and (ts - int(last_ts)) < cooldown_ms:
+                    continue
             score = None
             thr = None
             try:
@@ -203,19 +223,54 @@ def main(argv: Optional[List[str]] = None) -> int:
                     thr = float(r.get("threshold"))
             except Exception:
                 pass
+            candidates.append({"sym": sym, "ts": ts, "kind": kind, "score": score, "thr": thr, "key": key})
+        except Exception as e:
+            print(f"warn: failed to prepare alert row {r}: {e}")
+            continue
+
+    # Apply limit: prioritize storm, then newest
+    def _prio(k: str) -> int:
+        if k == "storm":
+            return 0
+        if k == "pre_alert":
+            return 1
+        return 2
+
+    candidates.sort(key=lambda x: (_prio(x["kind"]), -int(x["ts"])))
+    if isinstance(eff_limit, int) and eff_limit > 0 and len(candidates) > eff_limit:
+        candidates = candidates[: eff_limit]
+
+    # Send
+    sent_now = 0
+    for it in candidates:
+        sym = it["sym"]
+        ts = int(it["ts"])
+        kind = it["kind"]
+        score = it["score"]
+        thr = it["thr"]
+        key = it["key"]
+        try:
             text = _build_message(run_id, sym, kind, ts, score, thr, include_json=eff_include_json)
             if eff_dry:
                 print("DRY: ", text)
             else:
                 _send_telegram(token=token, chat_id=chat_id, text=text)
                 time.sleep(0.2)
-            sent[key] = True
+            if isinstance(sent, dict):
+                sent[key] = True
+            last_by_symbol[sym] = ts
             sent_now += 1
         except Exception as e:
-            print(f"warn: failed to send alert for row {r}: {e}")
+            print(f"warn: failed to send alert for {sym} {kind} {ts}: {e}")
             continue
 
-    if eff_only_new:
+    # Persist registry/meta if used
+    if isinstance(sent, dict) and (eff_only_new or eff_cooldown_min):
+        try:
+            meta["last_symbol_ts"] = last_by_symbol
+            sent["_meta"] = meta  # type: ignore[index]
+        except Exception:
+            pass
         _save_sent_registry(sent_reg_path, sent)
     print(f"Sent {sent_now} alerts to Telegram.")
     return 0
