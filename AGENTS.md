@@ -74,7 +74,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 ## New/Updated CLI Commands
 
-- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm]`
+- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert]`
 - `python -m cryptostorm retrieve <config> --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2 [--once]`
 - `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online]`
 - `python -m cryptostorm api <config> [--data data --features features --artifacts <dir> --reports reports --host 0.0.0.0 --port 8000 --token TOKEN]`
@@ -109,7 +109,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 - Telegram Alerts
   - Secrets are read from `secrets/telegram_bot_token.txt` and `secrets/telegram_chat_id.txt` via `configs/realtime.yaml`.
-  - Realtime now sends Telegram alerts by default (compose command includes `--send-telegram --telegram-kinds storm`).
+  - Realtime now sends Telegram alerts by default (compose includes `--send-telegram --telegram-kinds storm,pre_alert`).
   - Verify connectivity (buzz):
     - `TOKEN=$(<secrets/telegram_bot_token.txt); CHAT_ID=$(<secrets/telegram_chat_id.txt); curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" -d chat_id="${CHAT_ID}" --data-urlencode text="Buzz test" -d disable_notification=false`
   - Dry‑run sender (no network): `PYTHONPATH=src python -m cryptostorm alert-telegram configs/realtime.yaml --dry-run`.
@@ -120,7 +120,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
   - Start continuous realtime (5m‑aligned, Telegram on, builds reports):
     - `docker compose up realtime`
   - One‑shot cycle (single run + reports + Telegram):
-    - `docker compose run --rm backfill bash -lc 'scripts/run_realtime.sh -c configs/realtime.yaml --online --once --build-reports --send-telegram --telegram-kinds storm'`
+    - `docker compose run --rm backfill bash -lc 'scripts/run_realtime.sh -c configs/realtime.yaml --online --once --build-reports --send-telegram --telegram-kinds storm,pre_alert'`
 
 - Docker/Compose Test Commands
   - Docker: `docker build -t cryptostorm:tests . && docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`

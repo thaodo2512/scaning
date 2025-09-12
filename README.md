@@ -102,14 +102,14 @@
 - Single-process loop aligned to 5‑minute UTC bar closes:
   - `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --once` (single cycle)
   - Continuous: `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --poll-offset-s 10 --jitter-s 2`
-  - Steps per cycle: retrieve (incremental) → features `--update-last` → backtest (writes artifacts) → optional Telegram (use `--send-telegram` and env tokens)
+  - Steps per cycle: retrieve (incremental) → features `--update-last` → backtest (writes artifacts) → optional Telegram (use `--send-telegram` and env tokens; default kinds: storm,pre_alert)
 - Incremental feature append (without full rebuild):
   - `PYTHONPATH=src python -m cryptostorm feature configs/example.yaml --data data --out features --update-last`
 
 ## End-to-End Realtime
 - Convenience script to run realtime once (validate → realtime → report):
   - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once --report-engine plotly`
-  - Continuous watch (5m-aligned loop), with Telegram alerts:
+  - Continuous watch (5m-aligned loop), with Telegram alerts (default storm+pre_alert):
     - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
     - `--report-engine` options:
     - `price` (default): Plotly price+alerts only, `<SYM>_price_alert.html`
