@@ -507,8 +507,9 @@ def _fetch_time_sliced(
         got = _extract_items(resp)
         LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
         items.extend(got)
-        # gentle pacing to respect rate limits
-        time.sleep(0.3)
+        # Gentle pacing only when no global limiter is present; keep it minimal
+        if _RPS_LIMITER is None:
+            time.sleep(0.05)
     return items
 
 
@@ -725,13 +726,10 @@ def run_retrieve(
             out_file = out_dir / _output_filename(ds_key)
             # Load last_ts from sidecar state; fallback to file scan
             last_ts = _load_last_ts_state(out_dir, ds_key, True, out_file)
-            # Backfill mode: if time-slicing is enabled, ignore delta and fetch from base_start
-            if slice_days and slice_days > 0:
-                start_ms_local = base_start_ms
-            else:
-                start_ms_local = base_start_ms
-                if isinstance(last_ts, int):
-                    start_ms_local = max(base_start_ms, last_ts + 1)
+            # Delta mode by default: respect sidecar/file last_ts when present
+            start_ms_local = base_start_ms
+            if isinstance(last_ts, int):
+                start_ms_local = max(base_start_ms, last_ts + 1)
 
             # Align the request window to the dataset interval grid
             step_ms = _canonical_interval_ms(ds_key, interval)
@@ -776,7 +774,9 @@ def run_retrieve(
                 # Use time-slicing for v4 when configured; otherwise use paging
                 target_base = (host or base_url)
                 headers2 = _headers_for_path(api_key or "", path)
-                if slice_days and _path_is_v4(path):
+                # Use time-slicing for v4 when configured AND the requested window is larger than a single slice
+                window_ms = int(params["endTime"]) - int(params["startTime"])  # type: ignore[index]
+                if slice_days and _path_is_v4(path) and window_ms >= (slice_days * 24 * 60 * 60 * 1000):
                     slice_ms = slice_days * 24 * 60 * 60 * 1000
                     # Align the slice edges to the interval grid as well to avoid off-grid boundaries
                     step_ms_local = _canonical_interval_ms(ds_key, interval) or slice_ms
@@ -867,9 +867,24 @@ def run_retrieve(
                             "exchange": exchange,
                         }
                     host_for_fb = (v3_host if _path_is_v3(fallback) else base_url)
-                    items = fetch_all(fallback, host=host_for_fb)
+                    try:
+                        items = fetch_all(fallback, host=host_for_fb)
+                    except Exception as e2:  # noqa: BLE001
+                        LOG.error(
+                            "skip dataset after retries: %s %s (fallback failed): %s",
+                            ds_key,
+                            sym,
+                            e2,
+                        )
+                        continue
                 else:
-                    raise
+                    LOG.error(
+                        "skip dataset after retries: %s %s (preferred failed): %s",
+                        ds_key,
+                        sym,
+                        e,
+                    )
+                    continue
 
             written, skipped = _persist_jsonl(
                 out_file,

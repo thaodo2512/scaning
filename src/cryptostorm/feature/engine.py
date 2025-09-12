@@ -277,6 +277,37 @@ def _last_leq(series: Mapping[int, Any], ts: int) -> Optional[Any]:
     return series.get(k)
 
 
+# -------------------------
+# Orderbook helpers (performance)
+# -------------------------
+
+def _load_orderbook_snaps(data_dir: Path) -> List[Tuple[int, Mapping[str, Any]]]:
+    fp = data_dir / _output_filename("orderbook_futures_5m")
+    snaps: List[Tuple[int, Mapping[str, Any]]] = []
+    for rec in _read_jsonl(fp):
+        ts = rec.get("ts")
+        pl = rec.get("payload", {}) if isinstance(rec, Mapping) else {}
+        if isinstance(ts, (int, float)) and isinstance(pl, Mapping):
+            snaps.append((int(ts), pl))
+    snaps.sort(key=lambda x: x[0])
+    return snaps
+
+
+def _latest_ob_snap(snaps: List[Tuple[int, Mapping[str, Any]]], bar_ts: int, max_age_s: int) -> Optional[Mapping[str, Any]]:
+    if not snaps:
+        return None
+    import bisect
+
+    ts_list = [t for t, _ in snaps]
+    i = bisect.bisect_right(ts_list, bar_ts) - 1
+    if i < 0:
+        return None
+    snap_ts, payload = snaps[i]
+    if bar_ts - snap_ts > max_age_s * 1000:
+        return None
+    return payload
+
+
 def update_features_last(
     eff: EffectiveConfig,
     *,
@@ -348,12 +379,14 @@ def update_features_last(
             "data_ok": True,
         }
 
-        # OHLCV
+        # OHLCV (required for append in realtime incremental)
         if ts in ohlcv:
             for k, v in ohlcv[ts].items():
                 row[k] = v
         else:
-            row["data_ok"] = False
+            # Skip append entirely if the target bar has no OHLCV
+            LOG.info("%s features: OHLCV missing at ts=%s — skipping append", sym, _ms_to_iso(ts))
+            continue
 
         # Funding ffill
         last_funding = _last_leq(fnd, ts)
@@ -381,12 +414,13 @@ def update_features_last(
 
         # OB spread/depth
         max_age = eff.max_ob_age_s or 60
-        spread = _orderbook_spread_bps(sym_dir, ts, max_age)
+        snaps_ob = _load_orderbook_snaps(sym_dir)
+        spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
         if math.isnan(spread):
             row["data_ok"] = False
         row["spread_bps"] = spread
         try:
-            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp)
+            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
         except Exception:
             pass
 
@@ -509,22 +543,12 @@ def update_features_last(
         LOG.info("%s appended features row ts=%s -> %s", sym, _ms_to_iso(ts), out_fp)
 
 
-def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
-    fp = data_dir / _output_filename("orderbook_futures_5m")
+def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int, snaps: Optional[List[Tuple[int, Mapping[str, Any]]]] = None) -> float:
     best_spread_bps = math.nan
-    # Find the latest snapshot at or before bar_ts within age
-    latest: Optional[Tuple[int, Mapping[str, Any]]] = None
-    for rec in _read_jsonl(fp):
-        ts = rec.get("ts")
-        if not isinstance(ts, (int, float)):
-            continue
-        t = int(ts)
-        if t <= bar_ts and (latest is None or t > latest[0]):
-            latest = (t, rec.get("payload", {}))
-    if latest is None:
-        return best_spread_bps
-    snap_ts, payload = latest
-    if bar_ts - snap_ts > max_age_s * 1000:
+    if snaps is None:
+        snaps = _load_orderbook_snaps(data_dir)
+    payload = _latest_ob_snap(snaps, bar_ts, max_age_s)
+    if payload is None:
         return best_spread_bps
     bids = payload.get("bids") if isinstance(payload, Mapping) else None
     asks = payload.get("asks") if isinstance(payload, Mapping) else None
@@ -548,22 +572,13 @@ def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int) -> float:
     return spread_bps
 
 
-def _orderbook_depth_ratio(data_dir: Path, bar_ts: int, max_age_s: int, range_bp: Optional[int]) -> float:
+def _orderbook_depth_ratio(data_dir: Path, bar_ts: int, max_age_s: int, range_bp: Optional[int], snaps: Optional[List[Tuple[int, Mapping[str, Any]]]] = None) -> float:
     if not isinstance(range_bp, int) or range_bp <= 0:
         return math.nan
-    fp = data_dir / _output_filename("orderbook_futures_5m")
-    latest: Optional[Tuple[int, Mapping[str, Any]]] = None
-    for rec in _read_jsonl(fp):
-        ts = rec.get("ts")
-        if not isinstance(ts, (int, float)):
-            continue
-        t = int(ts)
-        if t <= bar_ts and (latest is None or t > latest[0]):
-            latest = (t, rec.get("payload", {}))
-    if latest is None:
-        return math.nan
-    snap_ts, payload = latest
-    if bar_ts - snap_ts > max_age_s * 1000:
+    if snaps is None:
+        snaps = _load_orderbook_snaps(data_dir)
+    payload = _latest_ob_snap(snaps, bar_ts, max_age_s)
+    if payload is None:
         return math.nan
     bids = payload.get("bids") if isinstance(payload, Mapping) else None
     asks = payload.get("asks") if isinstance(payload, Mapping) else None
@@ -671,6 +686,8 @@ def build_features(
         )
 
         rows: List[Dict[str, Any]] = []
+        # Pre-load orderbook snapshots once per symbol to avoid per-bar file scans
+        snaps_ob = _load_orderbook_snaps(sym_dir)
         # Precompute distributions for percentile features (30d window == current grid)
         funding_vals_sorted = sorted([v for v in fnd.values() if isinstance(v, (int, float))])
         oi_vals_sorted = sorted([v for v in oi.values() if isinstance(v, (int, float))])
@@ -773,14 +790,14 @@ def build_features(
 
             # order book spread; NaN if stale
             max_age = eff.max_ob_age_s or 60
-            spread = _orderbook_spread_bps(sym_dir, ts, max_age)
+            spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
             if math.isnan(spread):
                 row["data_ok"] = False
                 ob_stale += 1
             row["spread_bps"] = spread
             # optional depth ratio within +/- orderbook_range_bp
             try:
-                row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp)
+                row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
             except Exception:
                 pass
 
