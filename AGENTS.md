@@ -104,3 +104,36 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 ## Git Hygiene / Ignore
 - `.gitignore` expanded for `parquet/`, `ddl/`, `vendor/`, `*.parquet`.
 - Data directory `data/` ignored; past history purged via `git filter-repo` (use force‑push).
+
+## Ops Notes (2025‑09‑12)
+
+- Telegram Alerts
+  - Secrets are read from `secrets/telegram_bot_token.txt` and `secrets/telegram_chat_id.txt` via `configs/realtime.yaml`.
+  - Realtime now sends Telegram alerts by default (compose command includes `--send-telegram --telegram-kinds storm`).
+  - Verify connectivity (buzz):
+    - `TOKEN=$(<secrets/telegram_bot_token.txt); CHAT_ID=$(<secrets/telegram_chat_id.txt); curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" -d chat_id="${CHAT_ID}" --data-urlencode text="Buzz test" -d disable_notification=false`
+  - Dry‑run sender (no network): `PYTHONPATH=src python -m cryptostorm alert-telegram configs/realtime.yaml --dry-run`.
+
+- Realtime Run (online scoring)
+  - One‑time seed models for online scoring:
+    - `docker compose run --rm backfill bash -lc 'python -m cryptostorm retrieve configs/realtime.yaml --out data && python -m cryptostorm feature configs/realtime.yaml --data data --out features && python -m cryptostorm backtest configs/realtime.yaml --features features --artifacts-root artifacts/realtime'`
+  - Start continuous realtime (5m‑aligned, Telegram on, builds reports):
+    - `docker compose up realtime`
+  - One‑shot cycle (single run + reports + Telegram):
+    - `docker compose run --rm backfill bash -lc 'scripts/run_realtime.sh -c configs/realtime.yaml --online --once --build-reports --send-telegram --telegram-kinds storm'`
+
+- Docker/Compose Test Commands
+  - Docker: `docker build -t cryptostorm:tests . && docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
+  - Compose: `docker compose build backfill && docker compose run --rm backfill pytest -q`
+  - Live tests: add `-e RUN_LIVE_COINGLASS=1` and API key env or file.
+
+- Changes in this iteration
+  - Added `tests/test_notify_telegram.py` (dry‑run + only‑new registry).
+  - Made `run_retrieve(..., v3_base_url)` optional; defaults internally.
+  - Enabled Telegram in `docker-compose.yml` realtime by default (`--send-telegram`).
+  - README updated with Docker/Compose test commands.
+  - History cleaned: removed tracked `features/` and scrubbed `secrets/coinglass_api_key.txt` from history. Force‑push required after rewrite.
+
+- Troubleshooting
+  - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_5m: 1`, `storm_confirm_k_5m.default: 1` for a demo; re‑seed models, then run realtime.
+  - Telegram sends nothing: ensure realtime ran with `--send-telegram`; check `artifacts/<RUN_ID>/alerts/*.csv` has new rows; remove `artifacts/<RUN_ID>/alerts/telegram_sent.json` to resend for testing.
