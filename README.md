@@ -235,3 +235,17 @@
   - Or via file: `docker run --rm -e RUN_LIVE_COINGLASS=1 -e COINGLASS_API_KEY_FILE=/app/secrets/coinglass_api_key.txt -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
 - Run only Telegram tests:
   - `docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q -k telegram`
+
+## Run Unit Tests (Docker Compose)
+- Build the service image defined in `docker-compose.yml`:
+  - `docker compose build backfill`
+- Run all tests inside the `backfill` service container:
+  - `docker compose run --rm backfill pytest -q`
+- Run a subset (example: Telegram tests only):
+  - `docker compose run --rm backfill pytest -q -k telegram`
+- Include live Coinglass tests (requires API key):
+  - Env var: `docker compose run --rm -e RUN_LIVE_COINGLASS=1 -e COINGLASS_API_KEY=YOUR_KEY backfill pytest -q`
+  - Or via file: `docker compose run --rm -e RUN_LIVE_COINGLASS=1 -e COINGLASS_API_KEY_FILE=/app/secrets/coinglass_api_key.txt backfill pytest -q`
+
+Notes:
+- "docker" runs a single container by image; "docker compose" uses the repo’s compose services and their preconfigured environment/volumes.
