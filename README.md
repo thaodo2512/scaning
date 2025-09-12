@@ -222,3 +222,16 @@
 - Audit that each dataset has enough rows in the rolling 30‑day window:
   - `PYTHONPATH=src python -m cryptostorm audit configs/example.yaml --data data --min-ratio 0.95`
 - Output shows observed vs expected counts per symbol/dataset and fails if any ratio falls below the threshold.
+
+## Run Unit Tests (Docker)
+- Build image with dev deps:
+  - `docker build --pull -t cryptostorm:tests .`
+- Run all tests (live tests skipped by default):
+  - `docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
+- One‑liner build + run:
+  - `docker build -t cryptostorm:tests . && docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
+- Include live Coinglass tests (requires API key):
+  - Env var: `docker run --rm -e RUN_LIVE_COINGLASS=1 -e COINGLASS_API_KEY=YOUR_KEY -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
+  - Or via file: `docker run --rm -e RUN_LIVE_COINGLASS=1 -e COINGLASS_API_KEY_FILE=/app/secrets/coinglass_api_key.txt -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
+- Run only Telegram tests:
+  - `docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q -k telegram`
