@@ -15,6 +15,8 @@ services:
     environment:
       - PYTHONPATH=/app/src
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+      - TELEGRAM_BOT_TOKEN_FILE=/app/secrets/telegram_bot_token.txt
+      - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
     volumes:
       - ./:/app
     command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports --send-telegram --telegram-kinds storm,pre_alert"]
