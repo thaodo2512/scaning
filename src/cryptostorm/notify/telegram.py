@@ -68,7 +68,7 @@ def _save_sent_registry(path: Path, reg: Mapping[str, bool]) -> None:
         pass
 
 
-def _build_message(run_id: str, sym: str, kind: str, ts_ms: int, score: Optional[float], thr: Optional[float]) -> str:
+def _build_message(run_id: str, sym: str, kind: str, ts_ms: int, score: Optional[float], thr: Optional[float], *, include_json: bool = False) -> str:
     emoji = "⚠️" if kind == "pre_alert" else "🌩️" if kind == "storm" else "🔔"
     parts = [
         f"{emoji} {kind.replace('_', ' ').title()} {sym}",
@@ -77,6 +77,19 @@ def _build_message(run_id: str, sym: str, kind: str, ts_ms: int, score: Optional
     if isinstance(score, (int, float)) and isinstance(thr, (int, float)):
         parts.insert(1, f"Score: {score:.3f} vs thr {thr:.3f}")
     parts.append(f"run: {run_id}")
+    if include_json:
+        import json as _json
+        ctx = {
+            "symbol": sym,
+            "kind": kind,
+            "ts": int(ts_ms),
+            "ts_iso": _utc_iso(ts_ms),
+            "score": (float(score) if isinstance(score, (int, float)) else None),
+            "threshold": (float(thr) if isinstance(thr, (int, float)) else None),
+            "run_id": run_id,
+        }
+        # Append a compact one-line JSON for easy copy/paste to AI tools
+        parts.append(_json.dumps(ctx, separators=(",", ":")))
     return "\n".join(parts)
 
 
@@ -113,6 +126,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--since-ts", type=int, default=None, help="Only send alerts with ts >= since (ms)")
     parser.add_argument("--only-new", action="store_true", help="Send only alerts not seen before (persist registry)")
     parser.add_argument("--dry-run", action="store_true", help="Do not send, just print")
+    parser.add_argument("--include-json", action="store_true", help="Append a compact one-line JSON context for AI copy/paste")
 
     args = parser.parse_args(argv)
 
@@ -153,6 +167,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
     eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
     eff_only_new = bool(args.only_new or bool(tg_cfg.get("only_new")))
+    eff_include_json = bool(args.include_json or bool(tg_cfg.get("include_json")))
 
     if not eff_dry and (not token or not chat_id):
         print("error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or *_FILE)")
@@ -188,7 +203,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     thr = float(r.get("threshold"))
             except Exception:
                 pass
-            text = _build_message(run_id, sym, kind, ts, score, thr)
+            text = _build_message(run_id, sym, kind, ts, score, thr, include_json=eff_include_json)
             if eff_dry:
                 print("DRY: ", text)
             else:
