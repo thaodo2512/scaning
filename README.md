@@ -249,3 +249,10 @@
 
 Notes:
 - "docker" runs a single container by image; "docker compose" uses the repo’s compose services and their preconfigured environment/volumes.
+
+## Performance Tips
+- Realtime retrieve: avoid full-window refetches. Keep `acquisition.coinglass.slice_days` small for initial backfill, but deltas are always respected via sidecar `last_ts` (the retriever now uses `last_ts+1` even when `slice_days>0`). For pure realtime, you can also set `slice_days: 0`.
+- Time-slice pacing: a global RPS limiter in watch mode governs calls; per-slice delay is minimal when no limiter is set.
+- Features build (full backfill): orderbook processing is optimized to read snapshots once per symbol (previously O(N) file scans per bar). Still, building 30 days for many symbols is heavy; consider doing it once, then using `--online` scoring.
+- Backtest training cost: reduce `model.retrain_every_hours` (e.g., 12) and/or `per_tier_overrides.*.n_estimators` for large universes. `n_jobs: -1` already enables parallel trees.
+- Realtime scoring: prefer `realtime --online-scoring` with pre-seeded artifacts to avoid retraining each cycle.
