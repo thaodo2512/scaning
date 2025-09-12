@@ -141,7 +141,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--once", action="store_true", help="Run a single cycle immediately")
     parser.add_argument("--log-level", type=str, default="INFO")
     parser.add_argument("--send-telegram", action="store_true")
-    parser.add_argument("--telegram-kinds", type=str, default="storm")
+    parser.add_argument("--telegram-kinds", type=str, default="storm,pre_alert")
     parser.add_argument("--online-scoring", action="store_true", help="Use online scoring (no retrain) if artifacts present")
     parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")

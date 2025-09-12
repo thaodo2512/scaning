@@ -155,8 +155,7 @@ notifications:
     # Choose one of *_file or inline secrets
     bot_token_file: ./secrets/telegram_bot_token.txt
     chat_id_file:   ./secrets/telegram_chat_id.txt
-    kinds: storm
+    kinds: storm,pre_alert
     only_new: true
     since_ts: null
     dry_run: false
-

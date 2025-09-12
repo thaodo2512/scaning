@@ -97,7 +97,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--once", action="store_true")
     p_rt.add_argument("--log-level", type=str, default="INFO")
     p_rt.add_argument("--send-telegram", action="store_true")
-    p_rt.add_argument("--telegram-kinds", type=str, default="storm")
+    p_rt.add_argument("--telegram-kinds", type=str, default="storm,pre_alert")
     p_rt.add_argument("--online-scoring", action="store_true")
     p_rt.add_argument("--build-reports", action="store_true")
     p_rt.add_argument("--reports", type=str, default="reports")
