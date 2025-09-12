@@ -162,6 +162,12 @@
     - `GET /metrics?prom=true|false` — latest realtime SLOs (Prometheus text if `prom=true`)
   - Notes: requires `fastapi` and `uvicorn` (install if you plan to run the API)
 
+## Auto‑select Top Binance Symbols
+- Populate `universe.symbols` with the top USDT‑perp contracts by 30‑day quote volume:
+  - `PYTHONPATH=src python -m cryptostorm binance-top --top 100 --out configs/realtime.yaml --print`
+  - Uses Binance Futures API (`/fapi/v1/klines` 1d, last 30) and `/fapi/v1/ticker/24hr` to rank symbols.
+  - `--rps` controls pacing (default 5 req/s). Omit `--out` to just print JSON.
+
 ## Console Monitor (TUI)
 - Text dashboard to monitor freshness and SLOs:
   - `PYTHONPATH=src python -m cryptostorm monitor configs/top.yaml --data data --features features --symbols 20 --refresh-s 2`
