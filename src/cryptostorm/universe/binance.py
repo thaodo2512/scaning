@@ -27,7 +27,9 @@ def _http_get(url: str, params: Optional[Dict[str, Any]] = None, timeout: float 
             return body
 
 
-def _futures_usdt_perp_symbols() -> List[str]:
+def _futures_usdt_perp_symbols(verbose: bool = False) -> List[str]:
+    if verbose:
+        print("[binance-top] Fetching Binance exchange info (USDT‑perp symbols)…", flush=True)
     data = _http_get(f"{BINANCE_FAPI}/fapi/v1/exchangeInfo")
     out: List[str] = []
     for s in (data.get("symbols") or []):  # type: ignore[union-attr]
@@ -118,23 +120,37 @@ def _sum_30d_quote_volume(symbol: str, rps_delay_s: float) -> Tuple[float, float
     return vol30, vol24, ret30, rv30
 
 
-def select_top_binance_perps(top: int, *, rps: float = 5.0) -> List[RankRow]:
-    symbols = _futures_usdt_perp_symbols()
+def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = False) -> List[RankRow]:
+    symbols = _futures_usdt_perp_symbols(verbose=verbose)
     if not symbols:
+        if verbose:
+            print("[binance-top] No symbols fetched.", flush=True)
         return []
+    if verbose:
+        print(f"[binance-top] Found {len(symbols)} USDT‑perp symbols. Gathering 30d metrics (rps={rps})…", flush=True)
     delay = 0.0 if float(rps) <= 0 else 1.0 / float(rps)
     rows: List[RankRow] = []
+    n = len(symbols)
+    # progress step: ~20 updates across the run
+    step = max(1, n // 20)
+    t0 = time.time()
     for i, sym in enumerate(symbols):
         vol30, vol24, ret30, rv30 = _sum_30d_quote_volume(sym, delay)
         rows.append(RankRow(sym, vol30, vol24, ret30, rv30))
-        # basic pacing
         if delay > 0:
             time.sleep(delay)
+        if verbose and (i % step == 0 or i == n - 1):
+            pct = int((i + 1) * 100 / n)
+            elapsed = time.time() - t0
+            print(f"[binance-top] Processing {i+1}/{n} ({pct}%) elapsed={elapsed:.1f}s", end="\r", flush=True)
+    if verbose:
+        print()  # newline after progress
+        print("[binance-top] Ranking candidates by 30d/24h volume…", flush=True)
     rows.sort(key=lambda r: (r.vol30d_quote, r.vol24h_quote), reverse=True)
     return rows[: max(1, int(top))]
 
 
-def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_key: str) -> List[str]:
+def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_key: str, verbose: bool = False) -> List[str]:
     # Prepare a compact JSON for the model (limit to 150 candidates to keep prompt size reasonable)
     k = min(len(candidates), 150)
     objs = [
@@ -168,6 +184,8 @@ def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_ke
     import json as _json
 
     try:
+        if verbose:
+            print(f"[binance-top] Calling OpenAI model={model} for AI ranking on {len(objs)} candidates…", flush=True)
         body = _json.dumps({
             "model": model,
             "temperature": 0,
@@ -193,6 +211,8 @@ def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_ke
         # validate subset
         allow = {r.symbol for r in candidates}
         out = [s for s in out if s in allow]
+        if verbose:
+            print(f"[binance-top] AI selected {len(out)} symbols.", flush=True)
         return out[: max(1, int(top))]
     except Exception:
         return []
@@ -221,18 +241,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--openai-model", type=str, default="gpt-4o-mini", help="OpenAI chat model for ranking")
     args = parser.parse_args(argv)
 
-    rows = select_top_binance_perps(args.top * 2, rps=args.rps)  # gather a larger candidate set when AI is enabled
+    rows = select_top_binance_perps(args.top * 2, rps=args.rps, verbose=True)  # gather a larger candidate set when AI is enabled
     if args.ai:
         api_key = os.getenv("OPENAI_API_KEY") or ""
         ai_syms: List[str] = []
         if api_key:
-            ai_syms = _openai_chat_rank(rows, args.top, model=args.openai_model, api_key=api_key)
+            ai_syms = _openai_chat_rank(rows, args.top, model=args.openai_model, api_key=api_key, verbose=True)
         syms = ai_syms or [r.symbol for r in rows[: args.top]]
     else:
         syms = [r.symbol for r in rows]
+    print(f"[binance-top] Selected {len(syms)} symbols.", flush=True)
     if args.out:
         _update_config_symbols(Path(args.out), syms)
-        print(f"Updated {args.out} with {len(syms)} symbols")
+        print(f"[binance-top] Updated {args.out} with {len(syms)} symbols", flush=True)
     if args.print or not args.out:
         print(json.dumps({"symbols": syms}, indent=2))
     return 0
