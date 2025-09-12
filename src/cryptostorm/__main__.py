@@ -18,6 +18,7 @@ from .realtime.engine import main as realtime_main
 from .api.server import main as api_main
 from .storage.export import main as storage_main
 from .monitor.console import main as monitor_main
+from .universe.binance import main as binance_universe_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -132,6 +133,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_mon.add_argument("--refresh-s", type=float, default=2.0)
     p_mon.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
     p_mon.add_argument("--debug", action="store_true")
+
+    # Utility: auto-select Binance top USDT-perp symbols and update a config
+    p_uni = sub.add_parser("binance-top", help="Select top Binance USDT-perps and update universe.symbols in a config")
+    p_uni.add_argument("--top", type=int, default=100)
+    p_uni.add_argument("--rps", type=float, default=5.0)
+    p_uni.add_argument("--out", type=str, help="Path to YAML config to write/update")
+    p_uni.add_argument("--print", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -315,6 +323,15 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.debug:
             argv += ["--debug"]
         return monitor_main(argv)
+
+    # Hidden utility: select top Binance USDT-perps and update a config's universe.symbols
+    if args.cmd == "binance-top":  # pragma: no cover
+        argv = ["--top", str(args.top), "--rps", str(args.rps)]
+        if args.out:
+            argv += ["--out", args.out]
+        if args.print:
+            argv += ["--print"]
+        return binance_universe_main(argv)
 
     return 0
 
