@@ -2,7 +2,9 @@ run:
   run_id: 20250101-000000
   artifacts_root: ./artifacts
 universe:
-  symbols: []
+  symbols:
+  - SOLUSDT
+  - XRPUSDT
   tiering:
     A:
     - BTCUSDT

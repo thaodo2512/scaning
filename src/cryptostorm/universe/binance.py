@@ -272,6 +272,12 @@ def select_top_binance_perps(
     n = len(filtered)
     step = max(1, n // 20)
     t0 = time.time()
+    # Diagnostics counters
+    c_dq_drop = 0
+    c_micro_spread = 0
+    c_micro_depth = 0
+    c_micro_other = 0
+
     for i, meta in enumerate(filtered):
         sym = str(meta.get("symbol") or "").upper()
         base = str(meta.get("baseAsset") or "").upper()
@@ -280,13 +286,21 @@ def select_top_binance_perps(
             time.sleep(delay)
         # Data quality guards
         if valid < 25 or zero_days > 2:
+            c_dq_drop += 1
             continue
         # Microstructure snapshot
         spread_bps, bid_usd, ask_usd, mid, ok = _book_ticker(sym)
         if delay > 0:
             time.sleep(delay)
         depth_min = min(bid_usd, ask_usd)
-        if not ok or spread_bps > spread_max_bps or depth_min < depth_min_usd:
+        if not ok:
+            c_micro_other += 1
+            continue
+        if spread_bps > spread_max_bps:
+            c_micro_spread += 1
+            continue
+        if depth_min < depth_min_usd:
+            c_micro_depth += 1
             continue
         rows.append(
             RankRow(
@@ -317,8 +331,11 @@ def select_top_binance_perps(
 
     # Health gate
     gated: List[RankRow] = []
+    c_health_rv = 0
+    c_health_sharpe = 0
     for r in rows:
         if r.rv30d > rv_cap:
+            c_health_rv += 1
             continue
         if sharpe_min is not None:
             # Approximate Sharpe from 30d daily rets
@@ -328,6 +345,7 @@ def select_top_binance_perps(
             mean_daily = r.ret30d / 30.0
             sharpe = (mean_daily * math.sqrt(365.0) / rv_daily) if rv_daily > 0 else -1e9
             if sharpe < float(sharpe_min):
+                c_health_sharpe += 1
                 continue
         gated.append(r)
 
@@ -340,6 +358,7 @@ def select_top_binance_perps(
     # OI add-on on top N
     check_count = min(len(gated), max(n_oi, top))
     finalists: List[RankRow] = []
+    c_oi_fail = 0
     for r in gated[:check_count]:
         oi_usd = _open_interest_usd(r.symbol, r.mid_price)
         r.oi_usd = oi_usd
@@ -351,11 +370,26 @@ def select_top_binance_perps(
             finalists.append(r)
         if len(finalists) >= top:
             break
+        if oi_usd is None or not (
+            (oi_usd >= oi_min_usd) or (avg_daily_quote_7d > 0 and (oi_usd / avg_daily_quote_7d) >= oi_to_turnover_min)
+        ):
+            c_oi_fail += 1
 
     # Fallback: if not enough pass OI, just take top by rank without OI constraint (still health/microstructure-gated)
     if len(finalists) < top:
         add_more = [x for x in gated if x not in finalists]
         finalists.extend(add_more[: max(0, top - len(finalists))])
+
+    # Diagnostics summary
+    if verbose:
+        try:
+            print(
+                "[binance-top] Drop summary: data_quality=%d, spread=%d, depth=%d, micro_other=%d, rv_cap=%d, sharpe=%d, oi_fail=%d; survivors=%d"
+                % (c_dq_drop, c_micro_spread, c_micro_depth, c_micro_other, c_health_rv, c_health_sharpe, c_oi_fail, len(finalists)),
+                flush=True,
+            )
+        except Exception:
+            pass
 
     return finalists[: max(1, int(top))]
 
