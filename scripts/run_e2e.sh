@@ -13,6 +13,7 @@ Options:
   -m, --min-coverage <r>  Min coverage ratio for audit (default: 0.95)
   -l, --log-level <lvl>   Log level for retrieval (default: INFO)
       --features-interval 5m|15m|auto  Backtest features cadence (default: 15m)
+      --soft-fail         Do not fail pipeline on audit coverage failures
       --http-debug        Enable HTTP request/response debug logs for retrieve
       --dry-run           Dry-run retrieval (skips feature and audit)
   -h, --help              Show this help
@@ -31,6 +32,7 @@ LOG_LEVEL="INFO"
 DRY_RUN="0"
 HTTP_DEBUG="0"
 FEATURES_INTERVAL="15m"
+SOFT_FAIL_AUDIT="1"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     -m|--min-coverage) MIN_COVERAGE="$2"; shift 2;;
     -l|--log-level) LOG_LEVEL="$2"; shift 2;;
     --features-interval) FEATURES_INTERVAL="$2"; shift 2;;
+    --soft-fail) SOFT_FAIL_AUDIT="1"; shift;;
     --dry-run) DRY_RUN="1"; shift;;
     --http-debug) HTTP_DEBUG="1"; shift;;
     -h|--help) usage; exit 0;;
@@ -78,7 +81,11 @@ echo "[4/6] Running backtest ($FEATURES_INTERVAL) -> artifacts/<RUN_ID>/"
 python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL"
 
 echo "[5/6] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
-python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE" --soft-fail
+if [[ "$SOFT_FAIL_AUDIT" == "1" ]]; then
+  python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE" --soft-fail
+else
+  python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE"
+fi
 
 echo "[6/6] Generating interactive price+alerts (Plotly) -> reports/"
 python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out reports
