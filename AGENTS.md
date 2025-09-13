@@ -74,7 +74,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 ## New/Updated CLI Commands
 
-- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert --bar-interval 5m|15m]`
+- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 15 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert --bar-interval 5m|15m --coinglass-rps 4.1667]`
 - `python -m cryptostorm retrieve <config> --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2 [--once]`
 - `python -m cryptostorm feature <config> --data data --out features [--interval 5m|15m] [--update-last] [--workers N]`
 - `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online] [--features-interval 5m|15m|auto] [--workers N]`
@@ -137,6 +137,8 @@ Updated behaviors (2025‑09‑13):
     - Strict mode: `CRYPTOSTORM_STRICT_EMPTY=1 bash scripts/run_e2e.sh -c configs/realtime.yaml -l DEBUG`
   - Realtime single cycle: `python -m cryptostorm realtime configs/realtime.yaml --once --bar-interval 15m`
   - Continuous realtime (compose): `docker compose up realtime`
+  - Coinglass limiter: realtime uses a global limiter set to ~250 req/min by default (`--coinglass-rps 4.1667`).
+  - Bar settle: default poll offset is 15s to let the bar settle before retrieving.
 
 - Docker/Compose Test Commands
   - Docker: `docker build -t cryptostorm:tests . && docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`

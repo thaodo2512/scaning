@@ -324,10 +324,15 @@ def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_ke
     import urllib.request
     import urllib.error
     import json as _json
+    import time as _t
+    import os as _os
 
     try:
         if verbose:
-            print(f"[binance-top] Calling OpenAI model={model} for AI ranking on {len(objs)} candidates…", flush=True)
+            print(
+                f"[binance-top] Calling OpenAI model={model} for AI ranking on {len(objs)} candidates (top={top})…",
+                flush=True,
+            )
         body = _json.dumps({
             "model": model,
             "temperature": 0,
@@ -345,9 +350,23 @@ def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_ke
                 "Content-Type": "application/json",
             },
         )
+        t0 = _t.monotonic()
         with urllib.request.urlopen(req, timeout=30) as resp:
-            data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+            raw = resp.read()
+            elapsed_ms = int((_t.monotonic() - t0) * 1000)
+            try:
+                data = _json.loads(raw.decode("utf-8", errors="replace"))
+            except Exception:
+                data = {}
+        if verbose:
+            print(f"[binance-top] AI HTTP ok in {elapsed_ms} ms", flush=True)
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+        if (_os.getenv("CRYPTOSTORM_AI_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}) and verbose:
+            try:
+                snippet = content if len(content) <= 400 else (content[:400] + " … (truncated)")
+                print(f"[binance-top] AI raw content: {snippet}", flush=True)
+            except Exception:
+                pass
         parsed = _json.loads(content)
         out = [s for s in (parsed.get("symbols") or []) if isinstance(s, str)]
         # validate subset
@@ -356,7 +375,12 @@ def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_ke
         if verbose:
             print(f"[binance-top] AI selected {len(out)} symbols.", flush=True)
         return out[: max(1, int(top))]
-    except Exception:
+    except Exception as e:
+        if verbose:
+            try:
+                print(f"[binance-top] AI call failed: {e}", flush=True)
+            except Exception:
+                pass
         return []
 
 
@@ -391,6 +415,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Optional AI refinement over a bounded pool
     if args.ai and rows:
         api_key = os.getenv("OPENAI_API_KEY") or ""
+        if not api_key:
+            print("[binance-top] AI enabled but OPENAI_API_KEY not set; skipping AI ranking.", flush=True)
         ai_syms: List[str] = []
         if api_key:
             ai_syms = _openai_chat_rank(rows, args.top, model=args.openai_model, api_key=api_key, verbose=True)
@@ -399,6 +425,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             order = {s: i for i, s in enumerate(ai_syms)}
             rows = [r for r in rows if r.symbol in order]
             rows.sort(key=lambda r: order[r.symbol])
+        else:
+            if api_key:
+                print("[binance-top] AI returned no selection; using deterministic order.", flush=True)
 
     syms = [r.symbol for r in rows[: args.top]]
 
