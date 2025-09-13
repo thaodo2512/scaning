@@ -81,7 +81,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 - `python -m cryptostorm api <config> [--data data --features features --artifacts <dir> --reports reports --host 0.0.0.0 --port 8000 --token TOKEN]`
 - `python -m cryptostorm storage export-parquet <config> --data data --features features --out parquet`
 - `python -m cryptostorm storage emit-ddl <config> --kind clickhouse|timescale --out ./ddl`
-- `python -m cryptostorm binance-top --top 50 [--ai --openai-model gpt-4o-mini --rps 5.0 --out configs/realtime.yaml --print]`
+- `python -m cryptostorm binance-top --top 50 [--data data --ai --openai-model gpt-4o-mini --rps 5.0 --out configs/realtime.yaml --print]`
 - Reports:
   - Lightweight Charts: `python -m cryptostorm report <config> --data data --features features --out reports`
   - Plotly full: `python -m cryptostorm report-plotly <config> --data data --out reports`
@@ -148,10 +148,10 @@ Updated behaviors (2025‑09‑13):
   - Retrieval: strict empty handling (opt‑in), failure‑only HTTP dumps, dynamic slice clamp; default `slice_days: 10` in configs.
   - Realtime: passes cadence explicitly to backtest/online scoring; Telegram defaults standardized.
   - Audit: `--soft-fail` added; E2E uses soft‑fail.
-- Universe: `binance-top` is intentionally simple and deterministic (last closed UTC day):
-  - Base filter: USDT‑M PERPETUAL, status=TRADING from `exchangeInfo`.
-  - Stats: per symbol, fetch 30 daily klines (1d) and 24h ticker; compute `vol30d_quote`, `vol24h_quote` (also `rv30d`, `ret30d` for AI).
-  - Rank: sort by (−vol30d_quote, −vol24h_quote, symbol) and return exactly `--top`.
+- Universe: `binance-top` is intentionally simple and deterministic, and prefers local Coinglass data:
+  - Data-first: enumerate symbols from `data/<SYM>/` having `futures_ohlcv_{15m|5m}.jsonl` and compute `vol30d_quote` and `vol24h_quote` by summing `payload.volume_usd` over the last 30 days / 24h. This avoids live Binance calls and remains reproducible.
+  - Fallback: if no local data exists, fetch from Binance (`exchangeInfo` + 1d klines + 24h ticker) to compute the same metrics.
+  - Rank: sort by (−vol30d_quote, −vol24h_quote, symbol); return exactly `--top`.
   - Optional AI: `--ai --openai-model` can reorder the top pool; strict subset with fallback.
 
 - Troubleshooting

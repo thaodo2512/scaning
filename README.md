@@ -163,14 +163,18 @@
   - Notes: requires `fastapi` and `uvicorn` (install if you plan to run the API)
 
 ## Auto‑select Top Binance Symbols
-- Populate `universe.symbols` with the top USDT‑perp contracts by 30‑day quote volume:
-  - `PYTHONPATH=src python -m cryptostorm binance-top --top 100 --out configs/realtime.yaml --print`
-  - Uses Binance Futures API (`/fapi/v1/klines` 1d, last 30) and `/fapi/v1/ticker/24hr` to rank symbols.
-  - `--rps` controls pacing (default 5 req/s). Omit `--out` to just print JSON.
+- Populate `universe.symbols` with the top USDT‑perp contracts by quote volume (simple, deterministic):
+  - `PYTHONPATH=src python -m cryptostorm binance-top --top 100 --data data --out configs/realtime.yaml --print`
+  - Prefers local Coinglass data under `data/<SYM>/futures_ohlcv_{15m|5m}.jsonl` to compute:
+    - `vol30d_quote` (sum of `payload.volume_usd` over last 30 days)
+    - `vol24h_quote` (sum over last 24h)
+  - If no local data is found, it falls back to the Binance Futures listing (`/fapi/v1/exchangeInfo`) and fetches per‑symbol 1d klines + 24h ticker to compute the same metrics.
+  - Ranks by `(−vol30d_quote, −vol24h_quote, symbol)` and writes exactly `--top` symbols.
+  - `--data` defaults to `data` (change if your data root differs). `--rps` only applies when falling back to Binance.
 
 - AI‑assisted ranking (optional):
-  - `OPENAI_API_KEY=... PYTHONPATH=src python -m cryptostorm binance-top --top 100 --ai --openai-model gpt-4o-mini --out configs/realtime.yaml --print`
-  - The tool fetches objective metrics (30d/24h quote volume, 30d return, 30d realized volatility) and asks the model to pick the “most interesting” set from candidates. Output remains deterministic if the AI call fails (falls back to volume ranking).
+  - `OPENAI_API_KEY=... PYTHONPATH=src python -m cryptostorm binance-top --top 100 --ai --openai-model gpt-4o-mini --data data --out configs/realtime.yaml --print`
+  - The tool builds the objective metrics from local data when available and asks the model to pick the “most interesting” set from the candidate pool. If the AI call fails or is unavailable, it falls back to the deterministic volume ranking.
 
 ## Console Monitor (TUI)
 - Text dashboard to monitor freshness and SLOs:
