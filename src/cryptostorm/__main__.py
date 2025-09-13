@@ -143,7 +143,12 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_mon.add_argument("--debug", action="store_true")
 
     # Utility: auto-select Binance top USDT-perp symbols and update a config
-    p_uni = sub.add_parser("binance-top", help="Select top Binance USDT-perps and update universe.symbols in a config")
+    p_uni = sub.add_parser(
+        "binance-top",
+        help=(
+            "Deterministic USDT‑M PERP universe (liquidity/microstructure/health gates) and update universe.symbols"
+        ),
+    )
     p_uni.add_argument("--top", type=int, default=100)
     p_uni.add_argument("--rps", type=float, default=5.0)
     p_uni.add_argument("--out", type=str, help="Path to YAML config to write/update")

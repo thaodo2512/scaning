@@ -148,7 +148,16 @@ Updated behaviors (2025‑09‑13):
   - Retrieval: strict empty handling (opt‑in), failure‑only HTTP dumps, dynamic slice clamp; default `slice_days: 10` in configs.
   - Realtime: passes cadence explicitly to backtest/online scoring; Telegram defaults standardized.
   - Audit: `--soft-fail` added; E2E uses soft‑fail.
-  - Universe: added `binance-top` with optional OpenAI‑assisted ranking.
+- Universe: `binance-top` implements a deterministic, daily (last closed UTC day) selection:
+  - Base filter: USDT‑M PERPETUAL, marginAsset=USDT, quoteAsset=USDT, status=TRADING (linear only) from a single `exchangeInfo` fetch.
+  - Compliance filter: optional `configs/region_profile.yaml` deny lists (`deny_symbols`, `deny_bases`, `deny_keywords`); region via `CRYPTOSTORM_REGION` (default `global`).
+  - Data quality guards: require ≥25 valid daily klines over last 30 closed days; zero‑volume day cap ≤2; freeze universe for 24h (uses artifact if ≤24h old).
+  - Microstructure checks: one `bookTicker` snapshot; drop if spread_bps > `CRYPTOSTORM_SPREAD_MAX_BPS` (default 5) or min(top_of_book_usd) < `CRYPTOSTORM_DEPTH_MIN_USD` (default 20000).
+  - Stats: `vol30d_quote`, `vol7d_quote`, `vol24h_quote`, `rv30d` (annualized), `ret30d` (sum log returns).
+  - Primary rank: sort by (−vol30d, −vol7d, −vol24h, symbol).
+  - Health gate: drop if `rv30d` > `CRYPTOSTORM_RV_CAP` (default 2.0); optional Sharpe floor via `CRYPTOSTORM_SHARPE_MIN` (default −0.25).
+  - OI add‑on: for top `CRYPTOSTORM_N_OI` (default 50), require `oi_usd ≥ CRYPTOSTORM_OI_MIN_USD` (default 5e6) or `oi_usd / avg_daily_quote_7d ≥ CRYPTOSTORM_OI_TO_TURNOVER_MIN` (default 0.10). Fallback fills from health‑gated rank if too few pass.
+  - Outputs: updates `universe.symbols` and emits `artifacts/universe/binance_top.json` + `.csv` with thresholds, inputs hash, and metrics.
 
 - Troubleshooting
   - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_5m: 1`, `storm_confirm_k_5m.default: 1` for a demo; re‑seed models, then run realtime.

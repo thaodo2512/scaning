@@ -2,57 +2,7 @@ run:
   run_id: 20250101-000000
   artifacts_root: ./artifacts
 universe:
-  symbols:
-  - ETHUSDT
-  - BTCUSDT
-  - SOLUSDT
-  - XRPUSDT
-  - DOGEUSDT
-  - WLFIUSDT
-  - MYXUSDT
-  - LINKUSDT
-  - ADAUSDT
-  - ENAUSDT
-  - 1000PEPEUSDT
-  - SUIUSDT
-  - BNBUSDT
-  - AVAXUSDT
-  - BIOUSDT
-  - WLDUSDT
-  - HYPEUSDT
-  - FARTCOINUSDT
-  - PUMPUSDT
-  - SOMIUSDT
-  - NMRUSDT
-  - ARBUSDT
-  - AAVEUSDT
-  - PENGUUSDT
-  - LTCUSDT
-  - MUSDT
-  - WIFUSDT
-  - TAUSDT
-  - PYTHUSDT
-  - TRUMPUSDT
-  - 1000BONKUSDT
-  - UNIUSDT
-  - BCHUSDT
-  - XNYUSDT
-  - DOTUSDT
-  - API3USDT
-  - MEMEUSDT
-  - TRXUSDT
-  - FILUSDT
-  - MITOUSDT
-  - ONDOUSDT
-  - LDOUSDT
-  - IPUSDT
-  - BAKEUSDT
-  - CRVUSDT
-  - OPUSDT
-  - XPLUSDT
-  - NEARUSDT
-  - 1000SHIBUSDT
-  - ETCUSDT
+  symbols: []
   tiering:
     A:
     - BTCUSDT
@@ -214,6 +164,9 @@ conventions:
     GALAUSDT: GALA
     SUSHIUSDT: SUSHI
     LPTUSDT: LPT
+    NOTUSDT: NOT
+    MBOXUSDT: MBOX
+    EIGENTUSDT: EIGEN
   units:
     taker_volume: base
     liquidation_notional: USDT
