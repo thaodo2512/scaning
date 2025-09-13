@@ -146,7 +146,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_uni = sub.add_parser(
         "binance-top",
         help=(
-            "Deterministic USDT‑M PERP universe (liquidity/microstructure/health gates) and update universe.symbols"
+            "Select top Binance USDT‑M PERPs by 30d/24h quote volume and update universe.symbols"
         ),
     )
     p_uni.add_argument("--top", type=int, default=100)
