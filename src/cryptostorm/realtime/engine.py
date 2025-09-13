@@ -181,9 +181,21 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.online_scoring:
             from ..backtest.engine import score_online
 
-            score_online(cfg, eff, features_root=features_root, out_root=artifacts_root)
+            score_online(
+                cfg,
+                eff,
+                features_root=features_root,
+                out_root=artifacts_root,
+                features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+            )
         else:
-            run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root)
+            run_backtest(
+                cfg,
+                eff,
+                features_root=features_root,
+                out_root=artifacts_root,
+                features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+            )
         t3 = time.monotonic()
         # Optional alerts
         if args.send_telegram:
