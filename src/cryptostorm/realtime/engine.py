@@ -127,6 +127,40 @@ def _write_report_index(reports_root: Path, symbols: list[str]) -> None:
         pass
 
 
+def _build_report_one(
+    engine: str,
+    cfg: dict,
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    features_root: Path,
+    artifacts_root: Path,
+    reports_root: Path,
+    symbol: str,
+) -> str:
+    # Build a report for a single symbol by cloning EffectiveConfig
+    from dataclasses import replace
+
+    eff1 = replace(eff, symbols=[symbol], symbol_to_coin={k: v for k, v in eff.symbol_to_coin.items() if k == symbol})
+    try:
+        if engine == "plotly":
+            from ..report.plotly_full import build_reports as _b
+
+            _b(cfg, eff1, data_root=data_root, artifacts_root=artifacts_root, out_root=reports_root)
+        elif engine == "price":
+            from ..report.price_alert import build_reports as _b
+
+            _b(cfg, eff1, data_root=data_root, artifacts_root=artifacts_root, out_root=reports_root)
+        else:  # lightweight
+            from ..report.engine import build_reports as _b
+
+            _b(cfg, eff1, data_root=data_root, features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
+    except Exception:
+        # Best-effort; failure will just skip this symbol
+        pass
+    return symbol
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm realtime runner (Phase 1)")
     parser.add_argument("run", nargs="?", default="run", help="Subcommand placeholder (use 'run')")
@@ -234,19 +268,43 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.build_reports:
             try:
                 reports_root = Path(args.reports)
-                if args.report_engine == "plotly":
-                    from ..report.plotly_full import build_reports as build_plotly
+                if workers > 1:
+                    import concurrent.futures as _cf
 
-                    build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
-                elif args.report_engine == "price":
-                    from ..report.price_alert import build_reports as build_price
-
-                    build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                    done = 0
+                    total = len(eff.symbols)
+                    with _cf.ProcessPoolExecutor(max_workers=workers) as ex:
+                        futs = [
+                            ex.submit(
+                                _build_report_one,
+                                args.report_engine,
+                                cfg,
+                                eff,
+                                data_root=Path(args.data),
+                                features_root=features_root,
+                                artifacts_root=artifacts_root,
+                                reports_root=reports_root,
+                                symbol=s,
+                            )
+                            for s in eff.symbols
+                        ]
+                        for _f in _cf.as_completed(futs):
+                            done += 1
+                    _write_report_index(reports_root, eff.symbols)
                 else:
-                    from ..report.engine import build_reports as build_lw
+                    if args.report_engine == "plotly":
+                        from ..report.plotly_full import build_reports as build_plotly
 
-                    build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
-                _write_report_index(reports_root, eff.symbols)
+                        build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                    elif args.report_engine == "price":
+                        from ..report.price_alert import build_reports as build_price
+
+                        build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                    else:
+                        from ..report.engine import build_reports as build_lw
+
+                        build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
+                    _write_report_index(reports_root, eff.symbols)
             except Exception:
                 pass
         # SLO metrics
@@ -322,19 +380,41 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.build_reports:
                 try:
                     reports_root = Path(args.reports)
-                    if args.report_engine == "plotly":
-                        from ..report.plotly_full import build_reports as build_plotly
+                    if workers > 1:
+                        import concurrent.futures as _cf
 
-                        build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
-                    elif args.report_engine == "price":
-                        from ..report.price_alert import build_reports as build_price
-
-                        build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                        with _cf.ProcessPoolExecutor(max_workers=workers) as ex:
+                            futs = [
+                                ex.submit(
+                                    _build_report_one,
+                                    args.report_engine,
+                                    cfg,
+                                    eff,
+                                    data_root=Path(args.data),
+                                    features_root=features_root,
+                                    artifacts_root=artifacts_root,
+                                    reports_root=reports_root,
+                                    symbol=s,
+                                )
+                                for s in eff.symbols
+                            ]
+                            for _f in _cf.as_completed(futs):
+                                pass
+                        _write_report_index(reports_root, eff.symbols)
                     else:
-                        from ..report.engine import build_reports as build_lw
+                        if args.report_engine == "plotly":
+                            from ..report.plotly_full import build_reports as build_plotly
 
-                        build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
-                    _write_report_index(reports_root, eff.symbols)
+                            build_plotly(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                        elif args.report_engine == "price":
+                            from ..report.price_alert import build_reports as build_price
+
+                            build_price(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=reports_root)
+                        else:
+                            from ..report.engine import build_reports as build_lw
+
+                            build_lw(cfg, eff, data_root=Path(args.data), features_root=features_root, artifacts_root=artifacts_root, out_root=reports_root)
+                        _write_report_index(reports_root, eff.symbols)
                 except Exception:
                     pass
 
