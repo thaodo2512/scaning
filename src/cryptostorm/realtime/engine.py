@@ -168,7 +168,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--data", type=str, default="data")
     parser.add_argument("--features", type=str, default="features")
     parser.add_argument("--artifacts", type=str, help="Artifacts root override")
-    parser.add_argument("--poll-offset-s", type=float, default=10.0)
+    parser.add_argument("--poll-offset-s", type=float, default=15.0)
     parser.add_argument("--jitter-s", type=float, default=2.0)
     parser.add_argument("--once", action="store_true", help="Run a single cycle immediately")
     parser.add_argument("--log-level", type=str, default="INFO")
@@ -180,6 +180,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
     parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="5m")
     parser.add_argument("--workers", type=int, default=0, help="Per-symbol parallel workers for features/backtest (0=auto)")
+    parser.add_argument("--coinglass-rps", type=float, default=4.1667, help="Global Coinglass request rate (req/s), capped to ~250/min")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -205,6 +206,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             workers = int(_os.cpu_count() or 1)
     except Exception:
         workers = 1
+
+    # Set global Coinglass rate limiter (~250 req/min by default)
+    try:
+        rps = float(args.coinglass_rps)
+        if rps > 4.1667:
+            rps = 4.1667
+        if rps > 0:
+            _set_global_rps_limiter(_RateLimiter(rps))
+    except Exception:
+        pass
 
     if args.once:
         _cycle_start = time.monotonic()

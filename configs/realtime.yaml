@@ -38,8 +38,8 @@ universe:
   - BCHUSDT
   - DOTUSDT
   - XNYUSDT
-  - API3USDT
   - TRXUSDT
+  - API3USDT
   - SKLUSDT
   - MEMEUSDT
   - FILUSDT
@@ -103,6 +103,10 @@ universe:
   - QUSDT
   - ATOMUSDT
   - MITOUSDT
+  - SUSHIUSDT
+  - NOTUSDT
+  - VOXELUSDT
+  - MBOXUSDT
   tiering:
     A:
     - BTCUSDT
@@ -267,6 +271,7 @@ conventions:
     NOTUSDT: NOT
     MBOXUSDT: MBOX
     EIGENTUSDT: EIGEN
+    VOXELUSDT: VOXEL
   units:
     taker_volume: base
     liquidation_notional: USDT

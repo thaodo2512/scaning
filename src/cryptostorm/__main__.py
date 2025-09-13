@@ -99,7 +99,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--data", type=str, default="data")
     p_rt.add_argument("--features", type=str, default="features")
     p_rt.add_argument("--artifacts", type=str)
-    p_rt.add_argument("--poll-offset-s", type=float, default=10.0)
+    p_rt.add_argument("--poll-offset-s", type=float, default=15.0)
     p_rt.add_argument("--jitter-s", type=float, default=2.0)
     p_rt.add_argument("--once", action="store_true")
     p_rt.add_argument("--log-level", type=str, default="INFO")
@@ -111,6 +111,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
     p_rt.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
     p_rt.add_argument("--workers", type=int, default=0)
+    p_rt.add_argument("--coinglass-rps", type=float, default=4.1667)
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)
@@ -300,6 +301,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--build-reports", "--reports", args.reports, "--report-engine", args.report_engine]
         # Explicitly pass bar interval to engine (default 15m)
         argv += ["--bar-interval", args.bar_interval]
+        # Pass Coinglass RPS limiter (~250/min)
+        if float(getattr(args, "coinglass_rps", 0.0) or 0.0) > 0:
+            argv += ["--coinglass-rps", str(float(args.coinglass_rps))]
         if int(getattr(args, "workers", 0) or 0) > 0:
             argv += ["--workers", str(int(args.workers))]
         return realtime_main(argv)
