@@ -17,7 +17,85 @@ from ..config import EffectiveConfig, load_config, validate_config
 
 
 LOG = logging.getLogger("cryptostorm.retrieve")
-_HTTP_DEBUG = os.getenv("CRYPTOSTORM_HTTP_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+_HTTP_DEBUG_ENV = (os.getenv("CRYPTOSTORM_HTTP_DEBUG", "") or "").strip().lower()
+_HTTP_DEBUG_ALL = _HTTP_DEBUG_ENV in {"all", "2", "verbose"}
+_LAST_HTTP_SUCCESS: Optional[Dict[str, Any]] = None
+_LAST_HTTP_FAILURE: Optional[Dict[str, Any]] = None
+
+
+def _record_http_failure(*, url: str, status: Optional[int] = None, reason: Optional[str] = None, body: Optional[str] = None) -> None:
+    """Record details about the last failed HTTP request for follow-up debug logging.
+
+    Stored globally to be emitted by higher-level callers when they log warnings/errors.
+    """
+    global _LAST_HTTP_FAILURE
+    try:
+        _LAST_HTTP_FAILURE = {"url": url}
+        if status is not None:
+            _LAST_HTTP_FAILURE["status"] = int(status)
+        if reason:
+            _LAST_HTTP_FAILURE["reason"] = str(reason)
+        if body:
+            # Truncate very large bodies to keep logs sane
+            snippet = body if len(body) <= 8000 else (body[:8000] + " … (truncated)")
+            _LAST_HTTP_FAILURE["body"] = snippet
+    except Exception:
+        # Best-effort; never fail on logging helpers
+        _LAST_HTTP_FAILURE = {"url": url}
+
+
+def _debug_dump_last_http_failure(prefix: str = "") -> None:
+    """Emit a DEBUG log line with details of the last failed HTTP request, if any."""
+    try:
+        if _LAST_HTTP_FAILURE:
+            parts = [
+                f"url={_LAST_HTTP_FAILURE.get('url','-')}",
+            ]
+            if "status" in _LAST_HTTP_FAILURE:
+                parts.append(f"status={_LAST_HTTP_FAILURE.get('status')}")
+            if "reason" in _LAST_HTTP_FAILURE:
+                parts.append(f"reason={_LAST_HTTP_FAILURE.get('reason')}")
+            if "body" in _LAST_HTTP_FAILURE:
+                parts.append(f"body={_LAST_HTTP_FAILURE.get('body')}")
+            msg = (prefix + " ").rstrip() + (" " if prefix else "") + "; ".join(parts)
+            LOG.debug("HTTP FAIL %s", msg)
+    except Exception:
+        pass
+
+
+def _record_http_success(*, url: str, body: Optional[str] = None, json_obj: Optional[Any] = None) -> None:
+    """Record details about the last successful HTTP response (for debugging empty results)."""
+    global _LAST_HTTP_SUCCESS
+    try:
+        info: Dict[str, Any] = {"url": url}
+        if json_obj is not None:
+            try:
+                js = json.dumps(json_obj, ensure_ascii=False, separators=(",", ":"))
+                if len(js) > 8000:
+                    js = js[:8000] + " … (truncated)"
+                info["json"] = js
+            except Exception:
+                pass
+        elif body is not None:
+            snippet = body if len(body) <= 8000 else (body[:8000] + " … (truncated)")
+            info["body"] = snippet
+        _LAST_HTTP_SUCCESS = info
+    except Exception:
+        _LAST_HTTP_SUCCESS = {"url": url}
+
+
+def _debug_dump_last_http_success(prefix: str = "") -> None:
+    try:
+        if _LAST_HTTP_SUCCESS:
+            parts = [f"url={_LAST_HTTP_SUCCESS.get('url','-')}"]
+            if "json" in _LAST_HTTP_SUCCESS:
+                parts.append(f"json={_LAST_HTTP_SUCCESS.get('json')}")
+            if "body" in _LAST_HTTP_SUCCESS:
+                parts.append(f"body={_LAST_HTTP_SUCCESS.get('body')}")
+            msg = (prefix + " ").rstrip() + (" " if prefix else "") + "; ".join(parts)
+            LOG.debug("HTTP OK %s", msg)
+    except Exception:
+        pass
 
 
 # Optional global rate limiter (set by watch mode)
@@ -113,8 +191,20 @@ ENDPOINTS: Dict[str, Endpoint] = {
         fallback="/api/price/ohlc-history",
         level="symbol",
     ),
+    "futures_ohlcv_15m": Endpoint(
+        dataset="futures_ohlcv_15m",
+        preferred="/api/futures/price/history",
+        fallback="/api/price/ohlc-history",
+        level="symbol",
+    ),
     "spot_ohlcv_5m": Endpoint(
         dataset="spot_ohlcv_5m",
+        preferred="/api/spot/price/history",
+        fallback=None,
+        level="symbol",
+    ),
+    "spot_ohlcv_15m": Endpoint(
+        dataset="spot_ohlcv_15m",
         preferred="/api/spot/price/history",
         fallback=None,
         level="symbol",
@@ -137,8 +227,20 @@ ENDPOINTS: Dict[str, Endpoint] = {
         fallback="/api/futures/openInterest/ohlc-history",
         level="coin",
     ),
+    "oi_15m_ohlc": Endpoint(
+        dataset="oi_15m_ohlc",
+        preferred="/api/futures/open-interest/aggregated-history",
+        fallback="/api/futures/openInterest/ohlc-history",
+        level="coin",
+    ),
     "taker_futures_5m": Endpoint(
         dataset="taker_futures_5m",
+        preferred="/api/futures/v2/taker-buy-sell-volume/history",
+        fallback="/api/futures/aggregated-taker-buy-sell-volume/history",
+        level="symbol",
+    ),
+    "taker_futures_15m": Endpoint(
+        dataset="taker_futures_15m",
         preferred="/api/futures/v2/taker-buy-sell-volume/history",
         fallback="/api/futures/aggregated-taker-buy-sell-volume/history",
         level="symbol",
@@ -149,8 +251,20 @@ ENDPOINTS: Dict[str, Endpoint] = {
         fallback=None,
         level="symbol",
     ),
+    "taker_spot_15m": Endpoint(
+        dataset="taker_spot_15m",
+        preferred="/api/spot/taker-buy-sell-volume/history",
+        fallback=None,
+        level="symbol",
+    ),
     "liquidation_5m": Endpoint(
         dataset="liquidation_5m",
+        preferred="/api/futures/liquidation/aggregated-history",
+        fallback="/api/futures/liquidation/history",
+        level="coin",
+    ),
+    "liquidation_15m": Endpoint(
+        dataset="liquidation_15m",
         preferred="/api/futures/liquidation/aggregated-history",
         fallback="/api/futures/liquidation/history",
         level="coin",
@@ -221,6 +335,7 @@ def _path_is_v3(path: str) -> bool:
 def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapping[str, str], *, backoff_initial: float, backoff_max: float) -> Dict[str, Any]:
     import urllib.parse
     import urllib.request
+    import urllib.error
 
     url = f"{base_url.rstrip('/')}{path}"
     # Normalize parameter names to match endpoint conventions
@@ -255,43 +370,65 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
                 pass
         attempt += 1
         # Log the requested URL only when HTTP debug is enabled (env) or logger is in DEBUG
-        try:
-            if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
+        # Only log success-path HTTP traffic when explicitly requested (CRYPTOSTORM_HTTP_DEBUG=all)
+        if _HTTP_DEBUG_ALL:
+            try:
                 LOG.debug("HTTP GET %s", full_url)
-        except Exception:
-            pass
+            except Exception:
+                pass
         req = urllib.request.Request(full_url, headers=dict(headers))
         t0 = time.monotonic()
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read()
                 elapsed = (time.monotonic() - t0) * 1000
-                LOG.debug("GET %s -> %s in %.1f ms", full_url, resp.status, elapsed)
+                if _HTTP_DEBUG_ALL:
+                    LOG.debug("GET %s -> %s in %.1f ms", full_url, resp.status, elapsed)
                 text = raw.decode("utf-8", errors="replace")
                 try:
                     data = json.loads(text)
                 except Exception:
-                    # If the response isn't JSON, log textual snippet and re-raise
+                    # If the response isn't JSON, log textual snippet and re-raise (only in ALL mode)
                     try:
-                        snippet = text if len(text) <= 4000 else text[:4000] + " … (truncated)"
-                        if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
+                        if _HTTP_DEBUG_ALL:
+                            snippet = text if len(text) <= 4000 else text[:4000] + " … (truncated)"
                             LOG.debug("HTTP RESP (non-JSON) %s %s", full_url, snippet)
                     except Exception:
                         pass
                     raise
-                # Log JSON response in compact single-line form (truncated)
+                # Record last success for potential empty-result diagnostics
                 try:
-                    js = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
-                    if len(js) > 8000:
-                        js = js[:8000] + " … (truncated)"
-                    if _HTTP_DEBUG or LOG.isEnabledFor(logging.DEBUG):
-                        LOG.debug("HTTP RESP %s %s", full_url, js)
+                    _record_http_success(url=full_url, json_obj=data)
                 except Exception:
-                    # Best-effort logging; ignore failures
                     pass
+                # Log JSON response in compact single-line form (truncated) only in ALL mode
+                if _HTTP_DEBUG_ALL:
+                    try:
+                        js = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+                        if len(js) > 8000:
+                            js = js[:8000] + " … (truncated)"
+                        LOG.debug("HTTP RESP %s %s", full_url, js)
+                    except Exception:
+                        # Best-effort logging; ignore failures
+                        pass
                 return data
+        except urllib.error.HTTPError as he:  # type: ignore[attr-defined]
+            # Capture body for debug and retry/backoff unless attempts exhausted
+            body_text: Optional[str] = None
+            try:
+                body_bytes = he.read()  # type: ignore[no-untyped-call]
+                if body_bytes:
+                    body_text = body_bytes.decode("utf-8", errors="replace")
+            except Exception:
+                body_text = None
+            _record_http_failure(url=full_url, status=getattr(he, "code", None), reason=getattr(he, "reason", None), body=body_text)
+            if attempt >= 6:
+                raise
+            time.sleep(min(backoff, backoff_max))
+            backoff = min(backoff * 2, backoff_max)
         except Exception as e:  # noqa: BLE001
-            # Basic heuristics; treat as retryable up to a limit
+            # Non-HTTP errors (timeouts, DNS, etc.)
+            _record_http_failure(url=full_url, reason=str(e))
             if attempt >= 6:
                 raise
             time.sleep(min(backoff, backoff_max))
@@ -406,12 +543,13 @@ def _page_iter(base_url: str, headers: Mapping[str, str], path: str, params: Dic
                 max_len = 2000
                 if len(raw_snippet) > max_len:
                     raw_snippet = raw_snippet[:max_len] + " … (truncated)"
-                logging.getLogger("cryptostorm.retrieve").info(
-                    "empty page on preferred call: path=%s keys=%s resp=%s",
+                logging.getLogger("cryptostorm.retrieve").warning(
+                    "empty page on call: path=%s keys=%s resp=%s",
                     path,
                     keys,
                     raw_snippet,
                 )
+                _debug_dump_last_http_success("empty-page last response:")
             break
         new_in_page = 0
         for it in items:
@@ -521,13 +659,19 @@ def _fetch_time_sliced(
 def _output_filename(ds_key: str, exchange_market: str = "futures") -> str:
     mapping = {
         "futures_ohlcv_5m": "futures_ohlcv_5m.jsonl",
+        "futures_ohlcv_15m": "futures_ohlcv_15m.jsonl",
         "spot_ohlcv_5m": "spot_ohlcv_5m.jsonl",
+        "spot_ohlcv_15m": "spot_ohlcv_15m.jsonl",
         "funding_8h": "funding_8h_ohlc.jsonl",
         "funding_pred_5m": "funding_pred_5m_ohlc.jsonl",
         "oi_5m_ohlc": "oi_5m_ohlc.jsonl",
+        "oi_15m_ohlc": "oi_15m_ohlc.jsonl",
         "taker_futures_5m": "taker_futures_5m.jsonl",
+        "taker_futures_15m": "taker_futures_15m.jsonl",
         "taker_spot_5m": "taker_spot_5m.jsonl",
+        "taker_spot_15m": "taker_spot_15m.jsonl",
         "liquidation_5m": "liquidation_5m.jsonl",
+        "liquidation_15m": "liquidation_15m.jsonl",
         "orderbook_futures_5m": "orderbook_futures_5m.jsonl",
         "orderbook_spot_5m": "orderbook_spot_5m.jsonl",
     }
@@ -828,7 +972,7 @@ def run_retrieve(
                 host_for_used = (v3_host if _path_is_v3(used_path) else base_url)
                 items = fetch_all(used_path, host=host_for_used)
                 if not items and fallback:
-                    # Log additional context for debugging
+                    # Treat empty result as an error; escalate to fallback
                     _params_preview = {
                         k: params.get(k)
                         for k in ("symbol", "coin", "exchange", "interval")
@@ -840,13 +984,14 @@ def run_retrieve(
                             "end": _ms_to_iso(params.get("endTime")),
                         }
                     )
-                    LOG.info(
+                    LOG.warning(
                         "fallback to %s for %s %s (preferred returned 0 items) params=%s",
                         fallback,
                         ds_key,
                         sym,
                         _params_preview,
                     )
+                    _debug_dump_last_http_success("preferred empty result:")
                     used_path = fallback
                     # Adjust params for fallback (ensure symbol/exchange present)
                     if aggregated and ep.level == "coin":
@@ -859,10 +1004,20 @@ def run_retrieve(
                         }
                     host_for_fb = (v3_host if _path_is_v3(fallback) else base_url)
                     items = fetch_all(fallback, host=host_for_fb)
+                    if not items:
+                        LOG.error(
+                            "skip dataset after retries: %s %s (fallback returned 0 items)",
+                            ds_key,
+                            sym,
+                        )
+                        _debug_dump_last_http_success("fallback empty result:")
+                        continue
                 # No timeEnum retries for orderbook on v4; rely on interval=5m and time window
             except Exception as e:  # noqa: BLE001
                 if fallback:
                     LOG.warning("preferred endpoint failed (%s); trying fallback", e)
+                    # Emit debug details of the failed HTTP call (full URL + response)
+                    _debug_dump_last_http_failure("preferred failure:")
                     used_path = fallback
                     if aggregated and ep.level == "coin":
                         params = {
@@ -881,6 +1036,7 @@ def run_retrieve(
                             sym,
                             e2,
                         )
+                        _debug_dump_last_http_failure("fallback failure:")
                         continue
                 else:
                     LOG.error(
@@ -889,6 +1045,7 @@ def run_retrieve(
                         sym,
                         e,
                     )
+                    _debug_dump_last_http_failure("preferred failure:")
                     continue
 
             written, skipped = _persist_jsonl(
