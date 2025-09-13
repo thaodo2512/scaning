@@ -214,10 +214,10 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
   <title>CryptoStorm Report - {symbol}</title>
   <style>
     body {{ margin: 0; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; background: #111; color: #ddd; }}
-    .wrap {{ display: grid; grid-template-rows: 48vh 24vh 24vh; grid-gap: 6px; padding: 6px; }}
+    .wrap {{ display: grid; grid-template-rows: 60vh 40vh; grid-gap: 6px; padding: 6px; }}
     .panel {{ position: relative; border: 1px solid #333; border-radius: 6px; }}
     .title {{ position: absolute; top: 6px; left: 10px; font-size: 12px; color: #bbb; z-index: 10; }}
-    #top, #mid, #bot {{ height: 100%; }}
+    #top, #mid {{ height: 100%; }}
     .empty-msg {{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#777; font-size:12px; }}
   </style>
   {lwc}
@@ -226,7 +226,6 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
   <div class=\"wrap\">
     <div class=\"panel\"><div class=\"title\">{symbol} — Price + Alerts</div><div id=\"top\"></div></div>
     <div class=\"panel\"><div class=\"title\">IsolationForest Score</div><div id=\"mid\"></div></div>
-    <div class=\"panel\"><div class=\"title\">Open Interest + Liquidations</div><div id=\"bot\"></div></div>
   </div>
   <script>
     const priceRaw = {json.dumps(price)};
@@ -255,12 +254,10 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
 
     const topEl = document.getElementById('top');
     const midEl = document.getElementById('mid');
-    const botEl = document.getElementById('bot');
 
     // Avoid using global name 'top' which conflicts with window.top in browsers
     const chartTop = makeChart(topEl, {{ leftPriceScale: {{ borderVisible:false, visible:true }} }});
     const chartMid = makeChart(midEl);
-    const chartBot = makeChart(botEl);
 
     const priceLineData = candles.map(c => ({{ time: c.time, value: c.close }}));
     const priceLine = chartTop.addLineSeries({{ color:'#9bd', lineWidth:2 }});
@@ -294,30 +291,19 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
       thrLine.setData(thr);
     }}
 
-    const oiArea = chartBot.addAreaSeries({{ lineColor:'#2ecc71', topColor:'rgba(46, 204, 113, 0.4)', bottomColor:'rgba(46, 204, 113, 0.0)' }});
-    if (oi.length) oiArea.setData(oi);
-    const liqHist = chartBot.addHistogramSeries({{ color:'#9b59b6' }});
-    if (liq.length) liqHist.setData(liq);
-    if (!oi.length && !liq.length) {{
-      const m = document.createElement('div');
-      m.className = 'empty-msg';
-      m.textContent = 'No OI/Liquidation data available';
-      botEl.appendChild(m);
-    }}
+    // OI/Liquidations panel removed
 
     // Sync visible time range across charts
-    function sync(from, toA, toB) {{
+    function sync(from, toA) {{
       from.timeScale().subscribeVisibleTimeRangeChange((range) => {{
         if (range && range.from != null && range.to != null) {{
           const vr = {{ from: range.from, to: range.to }};
           try {{ toA.timeScale().setVisibleRange(vr); }} catch (e) {{ /* ignore */ }}
-          try {{ toB.timeScale().setVisibleRange(vr); }} catch (e) {{ /* ignore */ }}
         }}
       }});
     }}
-    sync(chartTop, chartMid, chartBot);
-    sync(chartMid, chartTop, chartBot);
-    sync(chartBot, chartTop, chartMid);
+    sync(chartTop, chartMid);
+    sync(chartMid, chartTop);
   </script>
 </body>
 </html>
@@ -330,8 +316,8 @@ def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Pa
     for sym in eff.symbols:
         data_dir = data_root / sym
         price = _extract_price(data_dir)
-        oi = _extract_oi(data_dir)
-        liq = _extract_liq(data_dir)
+        oi = []
+        liq = []
         scores_fp = artifacts_root / "scores" / f"{sym}.csv"
         alerts_fp = artifacts_root / "alerts" / f"{sym}.csv"
         sc = _read_scores(scores_fp)

@@ -140,7 +140,7 @@ def _inline_plotly() -> str:
     return "<script src=\"https://cdn.plot.ly/plotly-2.32.0.min.js\"></script>"
 
 
-def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str, Any]], oi: List[Dict[str, Any]], liq: List[Dict[str, Any]], alerts: List[Dict[str, Any]], *, include_oi_liq: bool = True) -> str:
+def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str, Any]], oi: List[Dict[str, Any]], liq: List[Dict[str, Any]], alerts: List[Dict[str, Any]], *, include_oi_liq: bool = False) -> str:
     plotly_js = _inline_plotly()
     # Build JS arrays
     o = [x["open"] for x in ohlc]
@@ -176,10 +176,10 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
   <title>CryptoStorm Report (Plotly) - {symbol}</title>
   <style>
     body {{ margin: 0; background: #111; color: #ddd; font-family: -apple-system, system-ui, Segoe UI, Roboto, sans-serif; }}
-    .wrap {{ padding: 8px; display: grid; grid-gap: 8px; grid-template-rows: 50vh 25vh 25vh; }}
+    .wrap {{ padding: 8px; display: grid; grid-gap: 8px; grid-template-rows: 60vh 40vh; }}
     .panel {{ border: 1px solid #333; border-radius: 6px; padding: 6px; background: #141414; }}
     .title {{ font-size: 12px; color: #bbb; margin: 2px 0 6px; }}
-    #p1,#p2,#p3 {{ width: 100%; height: calc(100% - 22px); }}
+    #p1,#p2 {{ width: 100%; height: calc(100% - 22px); }}
   </style>
   {plotly_js}
 </head>
@@ -187,7 +187,7 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
   <div class=\"wrap\">
     <div class=\"panel\"><div class=\"title\">{symbol} — Price + Alerts</div><div id=\"p1\"></div></div>
     <div class=\"panel\"><div class=\"title\">IsolationForest Score</div><div id=\"p2\"></div></div>
-    <div class=\"panel\"><div class=\"title\">Open Interest + Liquidations</div><div id=\"p3\"></div></div>
+    
   </div>
   <script>
     const t = {json.dumps(t)};
@@ -209,8 +209,7 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
 
     const p1 = document.getElementById('p1');
     const p2 = document.getElementById('p2');
-    const p3 = document.getElementById('p3');
-    const includeOiLiq = {str(include_oi_liq).lower()};
+    const includeOiLiq = false;
 
     const candle = {{
       type: 'candlestick',
@@ -231,15 +230,7 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     const thrTrace = {{ type:'scatter', mode:'lines', x: score_t.map(x => new Date(x * 1000)), y: thr_v, name:'threshold', line:{{ color:'#95a5a6', width:1, dash:'dot' }} }};
     Plotly.newPlot(p2, [scoreTrace, thrTrace], {{ paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
 
-    if (!includeOiLiq) {{
-      const wrap = document.querySelector('.wrap');
-      if (wrap) {{ wrap.style.gridTemplateRows = '60vh 40vh'; }}
-      if (p3 && p3.parentNode) {{ p3.parentNode.remove(); }}
-    }} else if (p3) {{
-      const oiTrace = {{ type:'scatter', mode:'lines', x: oi_t.map(x => new Date(x * 1000)), y: oi_v, name:'oi', line:{{ color:'#2ecc71', width:2 }} }};
-      const liqTrace = {{ type:'bar', x: liq_t.map(x => new Date(x * 1000)), y: liq_v, name:'liq', marker:{{ color:'#9b59b6' }} }};
-      Plotly.newPlot(p3, [oiTrace, liqTrace], {{ barmode:'overlay', paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
-    }}
+    // OI + Liquidations panel removed
   </script>
 </body>
 </html>
@@ -247,13 +238,13 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     return html
 
 
-def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path, artifacts_root: Path, out_root: Path, include_oi_liq: bool = True) -> None:
+def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path, artifacts_root: Path, out_root: Path, include_oi_liq: bool = False) -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     for sym in eff.symbols:
         data_dir = data_root / sym
         ohlc = _extract_price_ohlc(data_dir)
-        oi = _extract_oi(data_dir) if include_oi_liq else []
-        liq = _extract_liq(data_dir) if include_oi_liq else []
+        oi = []
+        liq = []
         scores_fp = artifacts_root / "scores" / f"{sym}.csv"
         alerts_fp = artifacts_root / "alerts" / f"{sym}.csv"
         sc = _read_scores(scores_fp)
@@ -293,7 +284,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--data", type=str, default="data")
     parser.add_argument("--artifacts", type=str)
     parser.add_argument("--out", type=str, default="reports")
-    parser.add_argument("--no-oi-liq", action="store_true", help="Hide the Open Interest + Liquidations panel")
+    # OI + Liq removed (no toggle)
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -304,7 +295,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     run_id = (cfg.get("run") or {}).get("run_id") or eff.run_id
     artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
-    build_reports(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=Path(args.out), include_oi_liq=(not args.no_oi_liq))
+    build_reports(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=Path(args.out))
     print(f"Plotly reports written to {args.out}")
     return 0
 

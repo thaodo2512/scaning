@@ -88,8 +88,8 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 - Plotly price+alerts: `python -m cryptostorm report-price <config> --data data --out reports`
 
 ## Reporting Engines
-- Default lightweight‑charts report preserved.
-- Added Plotly full reports (`report-plotly`) with candlesticks, score, OI + liq.
+- Default lightweight‑charts report preserved (price + score). OI/Liq panel removed.
+- Plotly full reports (`report-plotly`) now render candlesticks + score only (no OI/Liq panel).
   - Offline: place `plotly-2.32.0.min.js` in `vendor/` or `reports/vendor/`.
 
 ## Sidecar State
