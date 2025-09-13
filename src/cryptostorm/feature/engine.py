@@ -689,7 +689,17 @@ def _run_mode_for_symbol(
     out_root: Path,
     now_ms: Optional[int],
     symbol: str,
-) -> str:
+) -> tuple[str, int, float]:
+    import os as _os
+    import time as _time
+    # Ensure child has basic logging so INFO lines are visible
+    root = logging.getLogger()
+    if not root.handlers:
+        logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    LOG = logging.getLogger("cryptostorm.feature")
+    pid = _os.getpid()
+    t0 = _time.monotonic()
+    LOG.info("worker start: %s [%s] pid=%d", mode, symbol, pid)
     eff1 = _clone_eff_for_symbols(eff, [symbol])
     if mode == "build_5m":
         build_features(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
@@ -701,7 +711,9 @@ def _run_mode_for_symbol(
         update_features_last_15m(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
     else:  # pragma: no cover - defensive
         raise ValueError(f"unknown mode: {mode}")
-    return symbol
+    dur = _time.monotonic() - t0
+    LOG.info("worker done:   %s [%s] pid=%d in %.2fs", mode, symbol, pid, dur)
+    return symbol, pid, dur
 
 
 def _parallel_features(
@@ -713,9 +725,11 @@ def _parallel_features(
     interval: str,
     update_last: bool,
     workers: int,
+    log_level: str,
 ) -> None:
     import concurrent.futures as cf
     import os as _os
+    import time as _time
     LOG = logging.getLogger("cryptostorm.feature")
 
     mode = (
@@ -728,17 +742,26 @@ def _parallel_features(
     max_workers = max(1, max_workers)
     LOG.info("parallel features: mode=%s symbols=%d workers=%d", mode, len(symbols), max_workers)
 
+    # Map for simple progress durations
+    submit_ts: dict[str, float] = {}
+    total = len(symbols)
+    done = 0
     with cf.ProcessPoolExecutor(max_workers=max_workers) as ex:
-        fut_to_sym = {
-            ex.submit(_run_mode_for_symbol, mode, eff, data_root, out_root, now_ms, s): s
-            for s in symbols
-        }
+        fut_to_sym = {}
+        for s in symbols:
+            submit_ts[s] = _time.monotonic()
+            fut = ex.submit(_run_mode_for_symbol, mode, eff, data_root, out_root, now_ms, s)
+            fut_to_sym[fut] = s
         for fut in cf.as_completed(fut_to_sym):
             sym = fut_to_sym[fut]
+            done += 1
             try:
-                fut.result()
+                _sym, pid, dur = fut.result()
+                LOG.info("[%d/%d] %s done (pid=%d, %.2fs)", done, total, sym, pid, dur)
             except Exception as e:  # noqa: BLE001
-                LOG.warning("feature task failed for %s: %s", sym, e)
+                dur = _time.monotonic() - submit_ts.get(sym, _time.monotonic())
+                LOG.warning("[%d/%d] %s failed after %.2fs: %s", done, total, sym, dur, e)
+    LOG.info("parallel features complete: %d/%d finished", done, total)
 
 
 def build_features(
@@ -1246,6 +1269,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             interval=args.interval,
             update_last=bool(args.update_last),
             workers=int(args.workers),
+            log_level=args.log_level,
         )
     else:
         if args.update_last:
