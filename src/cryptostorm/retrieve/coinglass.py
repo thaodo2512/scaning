@@ -355,6 +355,10 @@ def _http_get(base_url: str, path: str, params: Mapping[str, Any], headers: Mapp
         if "exchange" in p and isinstance(p["exchange"], str):
             if p["exchange"].lower() == "binance":
                 p["exchange"] = "Binance"
+        # aggregated liquidation endpoints accept 'exchange_list'
+        if "exchange_list" in p and isinstance(p["exchange_list"], str):
+            if p["exchange_list"].lower() == "binance":
+                p["exchange_list"] = "Binance"
         # quote generally not required when using symbol=BTCUSDT
         p.pop("quote", None)
     # Clean None values
@@ -607,7 +611,7 @@ def _build_params(
         # Prefer 'symbol' for aggregated endpoints (e.g., open-interest/aggregated-history)
         params.update({"symbol": coin})
         # Some aggregated endpoints (e.g., liquidation aggregated) require 'exchange_list'
-        if ds_key == "liquidation_5m":
+        if ds_key in {"liquidation_5m", "liquidation_15m"}:
             params.update({"exchange_list": exchange})
     else:
         # Prefer canonical 'Binance' casing for exchange; v4 mapping enforces this
@@ -639,11 +643,14 @@ def _fetch_time_sliced(
     slice_ms: int,
 ) -> List[Mapping[str, Any]]:
     items: List[Mapping[str, Any]] = []
-    for s, e in _time_slices(start_ms, end_ms, slice_ms):
+    slices = list(_time_slices(start_ms, end_ms, slice_ms))
+    total_slices = len(slices)
+    for s, e in slices:
         local = {**params, "startTime": s, "endTime": e}
         resp = _http_get(base_url, path, local, headers, backoff_initial=1.0, backoff_max=8.0)
         got = _extract_items(resp)
-        LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
+        if _HTTP_DEBUG_ALL:
+            LOG.debug("slice %s..%s got %d", _ms_to_iso(s), _ms_to_iso(e), len(got))
         items.extend(got)
         # Gentle pacing only when no global limiter is present; allow disabling via env
         if _RPS_LIMITER is None:
@@ -653,6 +660,18 @@ def _fetch_time_sliced(
                 no_delay = False
             if not no_delay:
                 time.sleep(0.05)
+    # Summarize once in normal DEBUG mode to avoid per-slice spam
+    try:
+        if not _HTTP_DEBUG_ALL and LOG.isEnabledFor(logging.DEBUG):
+            LOG.debug(
+                "time-sliced window %s..%s across %d slices -> total %d items",
+                _ms_to_iso(start_ms),
+                _ms_to_iso(end_ms),
+                total_slices,
+                len(items),
+            )
+    except Exception:
+        pass
     return items
 
 
@@ -846,6 +865,7 @@ def run_retrieve(
         )
     headers = _default_headers(api_key or "")
     v3_host = (v3_base_url or "https://open-api.coinglass.com").rstrip("/")
+    strict_empty = (os.getenv("CRYPTOSTORM_STRICT_EMPTY", "") or "").strip().lower() in {"1", "true", "yes", "on"}
 
     # Iterate datasets based on config enable flags
     ds_items = list(eff.datasets.items())
@@ -1005,12 +1025,11 @@ def run_retrieve(
                     host_for_fb = (v3_host if _path_is_v3(fallback) else base_url)
                     items = fetch_all(fallback, host=host_for_fb)
                     if not items:
-                        LOG.error(
-                            "skip dataset after retries: %s %s (fallback returned 0 items)",
-                            ds_key,
-                            sym,
-                        )
+                        msg = f"skip dataset after retries: {ds_key} {sym} (fallback returned 0 items)"
+                        LOG.error(msg)
                         _debug_dump_last_http_success("fallback empty result:")
+                        if strict_empty:
+                            raise RuntimeError(msg)
                         continue
                 # No timeEnum retries for orderbook on v4; rely on interval=5m and time window
             except Exception as e:  # noqa: BLE001
@@ -1037,6 +1056,8 @@ def run_retrieve(
                             e2,
                         )
                         _debug_dump_last_http_failure("fallback failure:")
+                        if strict_empty:
+                            raise
                         continue
                 else:
                     LOG.error(
@@ -1046,6 +1067,8 @@ def run_retrieve(
                         e,
                     )
                     _debug_dump_last_http_failure("preferred failure:")
+                    if strict_empty:
+                        raise
                     continue
 
             written, skipped = _persist_jsonl(
