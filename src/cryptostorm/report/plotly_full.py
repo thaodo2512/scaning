@@ -216,8 +216,8 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
       x: t.map(x => new Date(x * 1000)),
       open: o, high: h, low: l, close: c,
       name: 'OHLC',
-      increasing: {{ line: {{ color: '#26a69a' }} }},
-      decreasing: {{ line: {{ color: '#ef5350' }} }},
+      increasing: {{ line: {{ color: '#777' }}, fillcolor: '#777' }},
+      decreasing: {{ line: {{ color: '#555' }}, fillcolor: '#555' }},
     }};
     const pre = pre_t.length ? {{ type:'scatter', mode:'markers', x: pre_t.map(x => new Date(x * 1000)), y: pre_v, name: 'pre_alert', marker: {{ color:'#f39c12', size:7, symbol:'circle' }} }} : null;
     const storm = storm_t.length ? {{ type:'scatter', mode:'markers', x: storm_t.map(x => new Date(x * 1000)), y: storm_v, name: 'storm', marker: {{ color:'#e74c3c', size:9, symbol:'triangle-up' }} }} : null;
@@ -229,6 +229,37 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     const scoreTrace = {{ type:'scatter', mode:'lines', x: score_t.map(x => new Date(x * 1000)), y: score_v, name:'score', line:{{ color:'#3498db', width:2 }} }};
     const thrTrace = {{ type:'scatter', mode:'lines', x: score_t.map(x => new Date(x * 1000)), y: thr_v, name:'threshold', line:{{ color:'#95a5a6', width:1, dash:'dot' }} }};
     Plotly.newPlot(p2, [scoreTrace, thrTrace], {{ paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
+
+    // Link zoom/pan between price (p1) and score (p2)
+    let __syncing = false;
+    function linkSync(src, dst) {{
+      if (!src || !dst || !src.addEventListener) return;
+      src.on('plotly_relayout', (ev) => {{
+        try {{
+          if (__syncing) return;
+          __syncing = true;
+          const upd = {{}};
+          if (ev && typeof ev === 'object') {{
+            if (ev['xaxis.range[0]'] && ev['xaxis.range[1]']) {{
+              upd['xaxis.range[0]'] = ev['xaxis.range[0]'];
+              upd['xaxis.range[1]'] = ev['xaxis.range[1]'];
+            }} else if (ev['xaxis.autorange']) {{
+              upd['xaxis.autorange'] = true;
+            }}
+          }}
+          if (Object.keys(upd).length) {{
+            Plotly.relayout(dst, upd).then(() => {{ __syncing = false; }}).catch(() => {{ __syncing = false; }});
+          }} else {{
+            __syncing = false;
+          }}
+        }} catch (e) {{ __syncing = false; }}
+      }});
+      src.on('plotly_doubleclick', () => {{
+        Plotly.relayout(dst, {{ 'xaxis.autorange': true }});
+      }});
+    }}
+    linkSync(p1, p2);
+    linkSync(p2, p1);
 
     // OI + Liquidations panel removed
   </script>
