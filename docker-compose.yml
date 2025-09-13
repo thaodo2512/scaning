@@ -5,9 +5,10 @@ services:
     environment:
       - PYTHONPATH=/app/src
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+      - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --build-reports"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --build-reports --report-engine plotly"]
 
   realtime:
     build: .
@@ -17,9 +18,10 @@ services:
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
       - TELEGRAM_BOT_TOKEN_FILE=/app/secrets/telegram_bot_token.txt
       - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
+      - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports --send-telegram --telegram-kinds storm,pre_alert"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports --report-engine plotly --send-telegram --telegram-kinds storm,pre_alert"]
     restart: unless-stopped
 
   api:
