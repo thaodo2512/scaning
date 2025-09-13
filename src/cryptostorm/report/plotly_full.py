@@ -140,7 +140,7 @@ def _inline_plotly() -> str:
     return "<script src=\"https://cdn.plot.ly/plotly-2.32.0.min.js\"></script>"
 
 
-def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str, Any]], oi: List[Dict[str, Any]], liq: List[Dict[str, Any]], alerts: List[Dict[str, Any]]) -> str:
+def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str, Any]], oi: List[Dict[str, Any]], liq: List[Dict[str, Any]], alerts: List[Dict[str, Any]], *, include_oi_liq: bool = True) -> str:
     plotly_js = _inline_plotly()
     # Build JS arrays
     o = [x["open"] for x in ohlc]
@@ -210,6 +210,7 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     const p1 = document.getElementById('p1');
     const p2 = document.getElementById('p2');
     const p3 = document.getElementById('p3');
+    const includeOiLiq = {str(include_oi_liq).lower()};
 
     const candle = {{
       type: 'candlestick',
@@ -230,9 +231,15 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     const thrTrace = {{ type:'scatter', mode:'lines', x: score_t.map(x => new Date(x * 1000)), y: thr_v, name:'threshold', line:{{ color:'#95a5a6', width:1, dash:'dot' }} }};
     Plotly.newPlot(p2, [scoreTrace, thrTrace], {{ paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
 
-    const oiTrace = {{ type:'scatter', mode:'lines', x: oi_t.map(x => new Date(x * 1000)), y: oi_v, name:'oi', line:{{ color:'#2ecc71', width:2 }} }};
-    const liqTrace = {{ type:'bar', x: liq_t.map(x => new Date(x * 1000)), y: liq_v, name:'liq', marker:{{ color:'#9b59b6' }} }};
-    Plotly.newPlot(p3, [oiTrace, liqTrace], {{ barmode:'overlay', paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
+    if (!includeOiLiq) {{
+      const wrap = document.querySelector('.wrap');
+      if (wrap) {{ wrap.style.gridTemplateRows = '60vh 40vh'; }}
+      if (p3 && p3.parentNode) {{ p3.parentNode.remove(); }}
+    }} else if (p3) {{
+      const oiTrace = {{ type:'scatter', mode:'lines', x: oi_t.map(x => new Date(x * 1000)), y: oi_v, name:'oi', line:{{ color:'#2ecc71', width:2 }} }};
+      const liqTrace = {{ type:'bar', x: liq_t.map(x => new Date(x * 1000)), y: liq_v, name:'liq', marker:{{ color:'#9b59b6' }} }};
+      Plotly.newPlot(p3, [oiTrace, liqTrace], {{ barmode:'overlay', paper_bgcolor:'#141414', plot_bgcolor:'#141414', font:{{ color:'#ddd' }}, xaxis:{{ gridcolor:'#333' }}, yaxis:{{ gridcolor:'#333' }}, margin:{{ l:40,r:20,t:10,b:30 }} }}, {{ displayModeBar:false, responsive:true }});
+    }}
   </script>
 </body>
 </html>
@@ -240,18 +247,18 @@ def _render_html(symbol: str, ohlc: List[Dict[str, Any]], scores: List[Dict[str,
     return html
 
 
-def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path, artifacts_root: Path, out_root: Path) -> None:
+def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path, artifacts_root: Path, out_root: Path, include_oi_liq: bool = True) -> None:
     out_root.mkdir(parents=True, exist_ok=True)
     for sym in eff.symbols:
         data_dir = data_root / sym
         ohlc = _extract_price_ohlc(data_dir)
-        oi = _extract_oi(data_dir)
-        liq = _extract_liq(data_dir)
+        oi = _extract_oi(data_dir) if include_oi_liq else []
+        liq = _extract_liq(data_dir) if include_oi_liq else []
         scores_fp = artifacts_root / "scores" / f"{sym}.csv"
         alerts_fp = artifacts_root / "alerts" / f"{sym}.csv"
         sc = _read_scores(scores_fp)
         al = _read_alerts(alerts_fp)
-        html = _render_html(sym, ohlc, sc, oi, liq, al)
+        html = _render_html(sym, ohlc, sc, oi, liq, al, include_oi_liq=include_oi_liq)
         (out_root / f"{sym}_plotly.html").write_text(html, encoding="utf-8")
     # Write a simple index to navigate reports
     try:
@@ -286,6 +293,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--data", type=str, default="data")
     parser.add_argument("--artifacts", type=str)
     parser.add_argument("--out", type=str, default="reports")
+    parser.add_argument("--no-oi-liq", action="store_true", help="Hide the Open Interest + Liquidations panel")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -296,7 +304,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     run_id = (cfg.get("run") or {}).get("run_id") or eff.run_id
     artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
-    build_reports(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=Path(args.out))
+    build_reports(cfg, eff, data_root=Path(args.data), artifacts_root=artifacts_root, out_root=Path(args.out), include_oi_liq=(not args.no_oi_liq))
     print(f"Plotly reports written to {args.out}")
     return 0
 
