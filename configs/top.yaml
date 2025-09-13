@@ -1,5 +1,5 @@
 run:
-  run_id: 20250101-000000
+  run_id: top_realtime
   artifacts_root: ./artifacts
 universe:
   symbols:
@@ -8,21 +8,6 @@ universe:
   - SOLUSDT
   - XRPUSDT
   - DOGEUSDT
-  - WLFIUSDT
-  - MYXUSDT
-  - LINKUSDT
-  - ADAUSDT
-  - ENAUSDT
-  - SUIUSDT
-  - 1000PEPEUSDT
-  - BNBUSDT
-  - AVAXUSDT
-  - BIOUSDT
-  - WLDUSDT
-  - FARTCOINUSDT
-  - HYPEUSDT
-  - PUMPUSDT
-  - ARBUSDT
   tiering:
     A:
     - BTCUSDT
@@ -190,11 +175,10 @@ conventions:
     open_interest: contracts
   orderbook:
     max_snapshot_age_s: 60
-
 notifications:
   telegram:
     bot_token_file: ./secrets/telegram_bot_token.txt
-    chat_id_file:   ./secrets/telegram_chat_id.txt
+    chat_id_file: ./secrets/telegram_chat_id.txt
     kinds: storm,pre_alert
     only_new: true
     include_json: true
