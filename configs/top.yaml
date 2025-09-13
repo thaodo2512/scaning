@@ -140,7 +140,8 @@ acquisition:
       taker_volume: 15m
       taker_spot_5m: 5m
       liquidation: 15m
-      orderbook_sample: last_of_5m
+      # Disable orderbook sampling for realtime to avoid 5m audit noise
+      # orderbook_sample: last_of_5m
       orderbook_range_bp: 10
     per_series_mode:
       futures_ohlcv: exchange
@@ -160,6 +161,7 @@ acquisition:
     funding_pred_5m: false
     taker_spot_5m: false
     orderbook_spot_5m: false
+    orderbook_futures_5m: false
     onchain_balances_daily: false
     etf_flows_daily: false
 features:
