@@ -12,6 +12,7 @@ Options:
   -f, --features <dir>    Features output directory (default: features)
   -m, --min-coverage <r>  Min coverage ratio for audit (default: 0.95)
   -l, --log-level <lvl>   Log level for retrieval (default: INFO)
+      --features-interval 5m|15m|auto  Backtest features cadence (default: auto)
       --http-debug        Enable HTTP request/response debug logs for retrieve
       --dry-run           Dry-run retrieval (skips feature and audit)
   -h, --help              Show this help
@@ -29,6 +30,7 @@ MIN_COVERAGE="0.95"
 LOG_LEVEL="INFO"
 DRY_RUN="0"
 HTTP_DEBUG="0"
+FEATURES_INTERVAL="auto"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,6 +39,7 @@ while [[ $# -gt 0 ]]; do
     -f|--features) FEATURES_DIR="$2"; shift 2;;
     -m|--min-coverage) MIN_COVERAGE="$2"; shift 2;;
     -l|--log-level) LOG_LEVEL="$2"; shift 2;;
+    --features-interval) FEATURES_INTERVAL="$2"; shift 2;;
     --dry-run) DRY_RUN="1"; shift;;
     --http-debug) HTTP_DEBUG="1"; shift;;
     -h|--help) usage; exit 0;;
@@ -71,8 +74,8 @@ fi
 echo "[3/6] Building features -> $FEATURES_DIR"
 python -m cryptostorm feature "$CONFIG" --data "$DATA_DIR" --out "$FEATURES_DIR"
 
-echo "[4/6] Running backtest -> artifacts/<RUN_ID>/"
-python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR"
+echo "[4/6] Running backtest ($FEATURES_INTERVAL) -> artifacts/<RUN_ID>/"
+python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL"
 
 echo "[5/6] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
 python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE"
