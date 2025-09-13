@@ -4,6 +4,7 @@ acquisition:
     api_key_file: secrets/coinglass_api_key.txt
     base_url: https://open-api-v4.coinglass.com
     exchange: binance
+    slice_days: 10
     intervals:
       funding_5m: 5m
       funding_8h: 8h

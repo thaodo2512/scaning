@@ -43,7 +43,7 @@ acquisition:
       page_limit: 500
       backoff_initial_s: 1
       backoff_max_s: 64
-    slice_days: 1
+    slice_days: 10
     orderbook_time_enum: LAST_OF_5M
     intervals:
       futures_ohlcv: 15m

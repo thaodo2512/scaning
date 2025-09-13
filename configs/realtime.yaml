@@ -6,6 +6,53 @@ universe:
   - ETHUSDT
   - BTCUSDT
   - SOLUSDT
+  - XRPUSDT
+  - DOGEUSDT
+  - WLFIUSDT
+  - MYXUSDT
+  - LINKUSDT
+  - ADAUSDT
+  - ENAUSDT
+  - 1000PEPEUSDT
+  - SUIUSDT
+  - BNBUSDT
+  - AVAXUSDT
+  - BIOUSDT
+  - WLDUSDT
+  - HYPEUSDT
+  - FARTCOINUSDT
+  - PUMPUSDT
+  - SOMIUSDT
+  - NMRUSDT
+  - ARBUSDT
+  - AAVEUSDT
+  - PENGUUSDT
+  - LTCUSDT
+  - MUSDT
+  - WIFUSDT
+  - TAUSDT
+  - PYTHUSDT
+  - TRUMPUSDT
+  - 1000BONKUSDT
+  - UNIUSDT
+  - BCHUSDT
+  - XNYUSDT
+  - DOTUSDT
+  - API3USDT
+  - MEMEUSDT
+  - TRXUSDT
+  - FILUSDT
+  - MITOUSDT
+  - ONDOUSDT
+  - LDOUSDT
+  - IPUSDT
+  - BAKEUSDT
+  - CRVUSDT
+  - OPUSDT
+  - XPLUSDT
+  - NEARUSDT
+  - 1000SHIBUSDT
+  - ETCUSDT
   tiering:
     A:
     - BTCUSDT
@@ -26,7 +73,7 @@ acquisition:
       page_limit: 500
       backoff_initial_s: 1
       backoff_max_s: 64
-    slice_days: 1
+    slice_days: 10
     orderbook_time_enum: LAST_OF_5M
     intervals:
       futures_ohlcv: 15m
@@ -173,11 +220,10 @@ conventions:
     open_interest: contracts
   orderbook:
     max_snapshot_age_s: 60
-
 notifications:
   telegram:
     bot_token_file: ./secrets/telegram_bot_token.txt
-    chat_id_file:   ./secrets/telegram_chat_id.txt
+    chat_id_file: ./secrets/telegram_chat_id.txt
     kinds: storm,pre_alert
     only_new: true
     include_json: true
