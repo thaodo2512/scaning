@@ -146,6 +146,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
     parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
+    parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="5m")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -165,12 +166,17 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.once:
         _cycle_start = time.monotonic()
-        bar_ts = _align_to_5m_close(_utc_now_ms())
+        step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+        bar_ts = _utc_now_ms() - (_utc_now_ms() % step_ms)
         # Timings
         t0 = time.monotonic()
         _retrieve_once(cfg, eff, data_root=data_root)
         t1 = time.monotonic()
-        update_features_last(eff, data_root=data_root, out_root=features_root)
+        if args.bar_interval == "15m":
+            from ..feature.engine import update_features_last_15m as _upd
+            _upd(eff, data_root=data_root, out_root=features_root)
+        else:
+            update_features_last(eff, data_root=data_root, out_root=features_root)
         t2 = time.monotonic()
         if args.online_scoring:
             from ..backtest.engine import score_online
@@ -229,7 +235,8 @@ def main(argv: Optional[list[str]] = None) -> int:
     LOG.info("Realtime loop started: offset=%.1fs jitter≤%.1fs", args.poll_offset_s, args.jitter_s)
     while True:
         now = _utc_now_ms()
-        bar_ts = _align_to_5m_close(now)
+        step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+        bar_ts = now - (now % step_ms)
         target = bar_ts + int(args.poll_offset_s * 1000)
         if now < target:
             _sleep_until(target, args.jitter_s)
@@ -239,7 +246,11 @@ def main(argv: Optional[list[str]] = None) -> int:
             t0 = time.monotonic()
             _retrieve_once(cfg, eff, data_root=data_root)
             t1 = time.monotonic()
-            update_features_last(eff, data_root=data_root, out_root=features_root)
+            if args.bar_interval == "15m":
+                from ..feature.engine import update_features_last_15m as _upd
+                _upd(eff, data_root=data_root, out_root=features_root)
+            else:
+                update_features_last(eff, data_root=data_root, out_root=features_root)
             t2 = time.monotonic()
             if args.online_scoring:
                 from ..backtest.engine import score_online
@@ -294,7 +305,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         except Exception as e:  # noqa: BLE001
             LOG.warning("Realtime cycle failed: %s", e)
         # Sleep until next bar's offset
-        next_target = _align_to_5m_close(_utc_now_ms()) + 5 * 60 * 1000 + int(args.poll_offset_s * 1000)
+        next_target = (_utc_now_ms() - (_utc_now_ms() % step_ms)) + step_ms + int(args.poll_offset_s * 1000)
         _sleep_until(next_target, args.jitter_s)
 
     return 0

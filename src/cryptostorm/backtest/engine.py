@@ -229,7 +229,7 @@ def _train_window_start(block_start: int, window_days: int) -> int:
     return block_start - window_days * 24 * 60 * 60 * 1000
 
 
-def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path) -> Dict[str, Any]:
+def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path, features_interval: str = "auto") -> Dict[str, Any]:
     # Extract model and alert params
     model_cfg = (cfg.get("model") or {})
     alerts_cfg = (cfg.get("alerts") or {})
@@ -265,7 +265,15 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     for sym in eff.symbols:
-        feat_fp = features_root / sym / "features_5m.csv"
+        # Select features file by requested interval
+        if features_interval == "15m":
+            feat_fp = features_root / sym / "features_15m.csv"
+        elif features_interval == "5m":
+            feat_fp = features_root / sym / "features_5m.csv"
+        else:  # auto
+            feat_fp = features_root / sym / "features_15m.csv"
+            if not feat_fp.exists():
+                feat_fp = features_root / sym / "features_5m.csv"
         rows = _read_csv_features(feat_fp)
         rows.sort(key=lambda r: (r.get("ts") or 0))
         if not rows:
@@ -469,7 +477,7 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
     return metrics
 
 
-def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path) -> Dict[str, Any]:
+def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path, features_interval: str = "auto") -> Dict[str, Any]:
     """Score only the latest row per symbol using persisted online artifacts.
 
     Appends to scores and updates alerts incrementally. Skips symbols without artifacts.
@@ -493,7 +501,14 @@ def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
         if not art:
             continue
         # Load latest row from features
-        feat_fp = features_root / sym / "features_5m.csv"
+        if features_interval == "15m":
+            feat_fp = features_root / sym / "features_15m.csv"
+        elif features_interval == "5m":
+            feat_fp = features_root / sym / "features_5m.csv"
+        else:
+            feat_fp = features_root / sym / "features_15m.csv"
+            if not feat_fp.exists():
+                feat_fp = features_root / sym / "features_5m.csv"
         rows = _read_csv_features(feat_fp)
         if not rows:
             continue
@@ -630,6 +645,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--features", type=str, default="features")
     parser.add_argument("--artifacts-root", type=str, help="Override artifacts root; defaults to run.artifacts_root/run_id")
     parser.add_argument("--online", action="store_true", help="Score only latest row using persisted artifacts (no retrain)")
+    parser.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto", help="Select which features cadence to use (default: auto)")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -643,10 +659,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     artifacts_root.mkdir(parents=True, exist_ok=True)
 
     if args.online:
-        summary = score_online(cfg, eff, features_root=Path(args.features), out_root=artifacts_root)
+        summary = score_online(cfg, eff, features_root=Path(args.features), out_root=artifacts_root, features_interval=str(args.features_interval))
         print(json.dumps({"online_summary": summary}))
     else:
-        run_backtest(cfg, eff, features_root=Path(args.features), out_root=artifacts_root)
+        run_backtest(cfg, eff, features_root=Path(args.features), out_root=artifacts_root, features_interval=str(args.features_interval))
         print(f"Backtest artifacts written to {artifacts_root}")
     return 0
 

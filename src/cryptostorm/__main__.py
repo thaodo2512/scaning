@@ -60,6 +60,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_bt.add_argument("config", type=str)
     p_bt.add_argument("--features", type=str, default="features")
     p_bt.add_argument("--artifacts-root", type=str)
+    p_bt.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
 
     p_rep = sub.add_parser("report", help="Generate per-symbol HTML reports")
     p_rep.add_argument("config", type=str)
@@ -216,7 +217,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         return feature_main([args.config, "--data", args.data, "--out", args.out, "--log-level", args.log_level])
 
     if args.cmd == "backtest":
-        argv = [args.config, "--features", args.features]
+        argv = [args.config, "--features", args.features, "--features-interval", args.features_interval]
         if args.artifacts_root:
             argv += ["--artifacts-root", args.artifacts_root]
         return backtest_main(argv)

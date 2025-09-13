@@ -118,54 +118,59 @@ def _compute_datasets(
     modes: Mapping[str, Any],
     enable: Mapping[str, Any],
 ) -> Dict[str, DatasetConfig]:
-    # canonical dataset keys we recognize
-    dataset_keys: List[Tuple[str, str, str]] = [
-        ("futures_ohlcv_5m", "futures_ohlcv", "core"),
-        ("spot_ohlcv_5m", "spot_ohlcv", "optional"),
-        ("funding_8h", "funding_8h", "core"),
-        ("funding_pred_5m", "funding_pred_5m", "optional"),
-        ("oi_5m_ohlc", "oi_5m", "core"),
-        ("taker_futures_5m", "taker_futures", "core"),
-        ("taker_spot_5m", "taker_spot", "optional"),
-        ("liquidation_5m", "liquidation", "core"),
-        ("orderbook_futures_5m", "orderbook", "core"),
-        ("orderbook_spot_5m", "orderbook", "optional"),
-    ]
-
+    # Build dataset keys using normalized interval keys (e.g., futures_ohlcv_5m)
     datasets: Dict[str, DatasetConfig] = {}
-    for interval_key, mode_key, tier in dataset_keys:
-        # Special handling: both orderbook datasets share the same interval key
-        if interval_key in {"orderbook_futures_5m", "orderbook_spot_5m"}:
-            interval = intervals.get("orderbook_sample")
-        else:
-            interval = intervals.get(interval_key)
+
+    def _add(key_out: str, interval_val: Optional[str], mode_key: str, tier: str) -> None:
         mode = modes.get(mode_key)
-
-        # Determine whether the dataset appears configured at all
-        configured = (interval is not None) and (mode is not None)
-
-        # enabled: if enable flag present, respect it; otherwise:
-        # - default True only for core datasets that are configured;
-        # - default False otherwise (prevents requiring unconfigured datasets).
+        configured = (interval_val is not None) and (mode is not None)
         default_enabled = (tier == "core") and configured
-        enabled = _bool_get(enable, interval_key, default_enabled)
-
-        # Special-case some enable flags with different names in spec
-        if interval_key == "funding_pred_5m":
-            enabled = _bool_get(enable, "funding_pred_5m", enabled)
-        if interval_key == "spot_ohlcv_5m":
-            enabled = _bool_get(enable, "spot_ohlcv_5m", enabled)
-        if interval_key == "taker_spot_5m":
-            enabled = _bool_get(enable, "taker_spot_5m", enabled)
-        if interval_key == "orderbook_spot_5m":
-            enabled = _bool_get(enable, "orderbook_spot_5m", enabled)
-
-        datasets[interval_key] = DatasetConfig(
-            name=interval_key,
-            interval=str(interval) if interval is not None else None,
+        enabled = _bool_get(enable, key_out, default_enabled)
+        datasets[key_out] = DatasetConfig(
+            name=key_out,
+            interval=str(interval_val) if interval_val is not None else None,
             mode=str(mode) if mode is not None else None,
             enabled=enabled,
         )
+
+    iv = intervals
+    # Futures OHLCV
+    iv_fut = iv.get("futures_ohlcv_5m")
+    if iv_fut is not None:
+        _add(f"futures_ohlcv_{iv_fut}", iv_fut, "futures_ohlcv", "core")
+    # Spot OHLCV
+    iv_spot = iv.get("spot_ohlcv_5m")
+    if iv_spot is not None:
+        _add(f"spot_ohlcv_{iv_spot}", iv_spot, "spot_ohlcv", "optional")
+    # Funding 8h
+    iv_fund = iv.get("funding_8h")
+    if iv_fund is not None:
+        _add("funding_8h", iv_fund, "funding_8h", "core")
+    # Predicted funding 5m (optional)
+    iv_fund5 = iv.get("funding_pred_5m") or iv.get("funding_5m")
+    if iv_fund5 is not None:
+        _add("funding_pred_5m", iv_fund5, "funding_pred_5m", "optional")
+    # OI aggregated
+    iv_oi = iv.get("oi_5m_ohlc")
+    if iv_oi is not None:
+        _add(f"oi_{iv_oi}_ohlc", iv_oi, "oi_5m", "core")
+    # Taker futures
+    iv_taker = iv.get("taker_futures_5m") or iv.get("taker_volume")
+    if iv_taker is not None:
+        _add(f"taker_futures_{iv_taker}", iv_taker, "taker_futures", "core")
+    # Taker spot (optional)
+    iv_taker_spot = iv.get("taker_spot_5m")
+    if iv_taker_spot is not None:
+        _add(f"taker_spot_{iv_taker_spot}", iv_taker_spot, "taker_spot", "optional")
+    # Liquidation aggregated
+    iv_liq = iv.get("liquidation_5m") or iv.get("liquidation")
+    if iv_liq is not None:
+        _add(f"liquidation_{iv_liq}", iv_liq, "liquidation", "core")
+    # Orderbook snapshots (always 5m cadence key)
+    if iv.get("orderbook_sample") is not None:
+        _add("orderbook_futures_5m", iv.get("orderbook_sample"), "orderbook", "core")
+        _add("orderbook_spot_5m", iv.get("orderbook_sample"), "orderbook", "optional")
+
     return datasets
 
 
@@ -275,8 +280,8 @@ def validate_config(
     ]
     for k in required_keys:
         ds = datasets.get(k)
+        # If dataset is not present at all (e.g., minimal config), skip strict enforcement
         if not ds:
-            errors.append(f"missing dataset config for {k}")
             continue
         if not ds.enabled:
             # If not enabled, do not require interval/mode

@@ -7,14 +7,14 @@ acquisition:
     intervals:
       funding_5m: 5m
       funding_8h: 8h
-      futures_ohlcv: 5m
-      liquidation: 5m
-      oi_ohlc: 5m
+      futures_ohlcv: 15m
+      liquidation: 15m
+      oi_ohlc: 15m
       orderbook_range_bp: 10
       orderbook_sample: last_of_5m
-      spot_ohlcv: 5m
+      spot_ohlcv: 15m
       taker_spot_5m: 5m
-      taker_volume: 5m
+      taker_volume: 15m
     paging:
       backoff_initial_s: 1
       backoff_max_s: 64
@@ -52,6 +52,16 @@ alerts:
 conventions:
   orderbook:
     max_snapshot_age_s: 60
+
+notifications:
+  telegram:
+    bot_token_file: ./secrets/telegram_bot_token.txt
+    chat_id_file:   ./secrets/telegram_chat_id.txt
+    kinds: storm,pre_alert
+    only_new: true
+    include_json: true
+    cooldown_min: 60
+    limit: 10
   symbol_to_coin:
     BTCUSDT: BTC
     ETHUSDT: ETH

@@ -1,77 +1,72 @@
 run:
-  run_id: "realtime"           # Fixed run id for live artifacts (artifacts/realtime)
-  artifacts_root: "./artifacts"
-
+  run_id: 20250101-000000
+  artifacts_root: ./artifacts
 universe:
-  # Top Binance USDT-M contracts (Tier A first)
-  symbols: [
-    "BTCUSDT","ETHUSDT","BNBUSDT","SOLUSDT","XRPUSDT",
-    # "ADAUSDT","DOGEUSDT","TONUSDT","TRXUSDT","AVAXUSDT",
-    # "SHIBUSDT","DOTUSDT","LINKUSDT","BCHUSDT","LTCUSDT",
-    # "MATICUSDT","NEARUSDT","UNIUSDT","ATOMUSDT","ETCUSDT",
-    # "APTUSDT","ARBUSDT","OPUSDT","SUIUSDT","FILUSDT",
-    # "INJUSDT","SEIUSDT","IMXUSDT","RENDERUSDT","STXUSDT",
-    # "HBARUSDT","ALGOUSDT","XLMUSDT","MKRUSDT","AAVEUSDT",
-    # "RUNEUSDT","QNTUSDT","AXSUSDT","MANAUSDT","SANDUSDT",
-    # "PEPEUSDT","FLOKIUSDT","WLDUSDT","JUPUSDT","PYTHUSDT",
-    # "ONDOUSDT","TIAUSDT","BONKUSDT","ETHFIUSDT","GALAUSDT"
-  ]
-  tiering: { A: ["BTCUSDT","ETHUSDT"], B: 20, C: 30 }
-
+  symbols:
+  - ETHUSDT
+  - BTCUSDT
+  - SOLUSDT
+  tiering:
+    A:
+    - BTCUSDT
+    - ETHUSDT
+    B: 20
+    C: 30
 acquisition:
   mode: coinglass_only
   days: 30
   coinglass:
     base_url: https://open-api-v4.coinglass.com
     api_key_env: COINGLASS_API_KEY
-    # Optional: read from file instead of env var
     api_key_file: ./secrets/coinglass_api_key.txt
     exchange: binance
     quote: USDT
     prefer_aggregated: true
-    paging: { page_limit: 500, backoff_initial_s: 1, backoff_max_s: 64 }
-    # Retrieval tuning for realtime/backfill
-    slice_days: 1              # time-slice v4 requests by N days to avoid paging limits; 0=disable
-    #force_v3: []               # datasets to fetch via v3 per-exchange endpoints (e.g., ["futures_ohlcv_5m","oi_5m_ohlc"])
+    paging:
+      page_limit: 500
+      backoff_initial_s: 1
+      backoff_max_s: 64
+    slice_days: 1
     orderbook_time_enum: LAST_OF_5M
     intervals:
-      futures_ohlcv: "5m"
-      spot_ohlcv:    "5m"
-      funding_8h:    "8h"
-      funding_5m:    "5m"   # predicted funding (normalized to funding_pred_5m)
-      oi_ohlc:       "5m"
-      taker_volume:  "5m"   # normalized to taker_futures_5m
-      taker_spot_5m: "5m"
-      liquidation:   "5m"
-      orderbook_sample: "last_of_5m"
+      futures_ohlcv: 15m
+      spot_ohlcv: 15m
+      funding_8h: 8h
+      funding_5m: 5m
+      oi_ohlc: 15m
+      taker_volume: 15m
+      taker_spot_5m: 5m
+      liquidation: 15m
+      orderbook_sample: last_of_5m
       orderbook_range_bp: 10
     per_series_mode:
       futures_ohlcv: exchange
-      spot_ohlcv:    exchange
-      funding_8h:    exchange
-      funding_5m:    exchange  # normalized to funding_pred_5m
-      oi_5m:         aggregated
-      ls_ratio:      aggregated
+      spot_ohlcv: exchange
+      funding_8h: exchange
+      funding_5m: exchange
+      oi_5m: aggregated
+      ls_ratio: aggregated
       taker_futures: exchange
-      taker_spot:    exchange
-      liquidation:   aggregated
-      orderbook:     exchange
-      onchain:       aggregated
-      etf:           aggregated
+      taker_spot: exchange
+      liquidation: aggregated
+      orderbook: exchange
+      onchain: aggregated
+      etf: aggregated
   enable:
     spot_ohlcv_5m: true
     funding_pred_5m: false
-    taker_spot_5m:  false
+    taker_spot_5m: false
     orderbook_spot_5m: false
     onchain_balances_daily: false
     etf_flows_daily: false
-
 features:
   qc:
     drop_day_if_missing_minute_ratio_gt: 0.01
   funding:
-    settlement_hours_utc: [0, 8, 16]
-
+    settlement_hours_utc:
+    - 0
+    - 8
+    - 16
 model:
   algo: isolation_forest
   random_state: 42
@@ -79,22 +74,45 @@ model:
   retrain_every_hours: 8
   threshold_q: 0.97
   min_feature_coverage: 0.95
-  scaler: { type: robust, clip_quantiles: [0.01, 0.99] }
-  iforest_defaults: { contamination: "auto", max_features: 0.70, bootstrap: false, n_jobs: -1 }
+  scaler:
+    type: robust
+    clip_quantiles:
+    - 0.01
+    - 0.99
+  iforest_defaults:
+    contamination: auto
+    max_features: 0.7
+    bootstrap: false
+    n_jobs: -1
   per_tier_overrides:
-    A: { n_estimators: 300, max_samples: 512,  max_features: 0.70, contamination: "auto" }
-    B: { n_estimators: 500, max_samples: 1024, max_features: 0.70, contamination: "auto" }
-    C: { n_estimators: 500, max_samples: 1024, max_features: 0.60, contamination: "auto" }
-
+    A:
+      n_estimators: 300
+      max_samples: 512
+      max_features: 0.7
+      contamination: auto
+    B:
+      n_estimators: 500
+      max_samples: 1024
+      max_features: 0.7
+      contamination: auto
+    C:
+      n_estimators: 500
+      max_samples: 1024
+      max_features: 0.6
+      contamination: auto
 alerts:
   persist_k_5m: 2
-  storm_confirm_k_5m: { A: 1, default: 2 }
+  storm_confirm_k_5m:
+    A: 1
+    default: 2
   cooldown_bars: 12
-
 labels:
   pct_move: 0.05
-  horizons_min: [30, 60, 90, 120]
-
+  horizons_min:
+  - 30
+  - 60
+  - 90
+  - 120
 conventions:
   symbol_to_coin:
     BTCUSDT: BTC
@@ -147,15 +165,21 @@ conventions:
     BONKUSDT: BONK
     ETHFIUSDT: ETHFI
     GALAUSDT: GALA
-  units: { taker_volume: base, liquidation_notional: USDT, open_interest: contracts }
-  orderbook: { max_snapshot_age_s: 60 }
+    SUSHIUSDT: SUSHI
+    LPTUSDT: LPT
+  units:
+    taker_volume: base
+    liquidation_notional: USDT
+    open_interest: contracts
+  orderbook:
+    max_snapshot_age_s: 60
 
 notifications:
   telegram:
-    # Choose one of *_file or inline secrets
     bot_token_file: ./secrets/telegram_bot_token.txt
     chat_id_file:   ./secrets/telegram_chat_id.txt
     kinds: storm,pre_alert
     only_new: true
-    since_ts: null
-    dry_run: false
+    include_json: true
+    cooldown_min: 60
+    limit: 10
