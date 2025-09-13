@@ -108,6 +108,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--build-reports", action="store_true")
     p_rt.add_argument("--reports", type=str, default="reports")
     p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
+    p_rt.add_argument("--workers", type=int, default=0)
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)
@@ -287,6 +288,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--online-scoring"]
         if args.build_reports:
             argv += ["--build-reports", "--reports", args.reports, "--report-engine", args.report_engine]
+        if int(getattr(args, "workers", 0) or 0) > 0:
+            argv += ["--workers", str(int(args.workers))]
         return realtime_main(argv)
 
     if args.cmd == "api":

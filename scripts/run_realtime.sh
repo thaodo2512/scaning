@@ -60,6 +60,7 @@ ENSURE_RPS="3"
 MONITOR="0"
 MONITOR_VIEW="alerts"
 MONITOR_SYMBOLS="20"
+WORKERS_AUTO=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -98,6 +99,22 @@ fi
 
 export PYTHONPATH=${PYTHONPATH:-src}
 
+# Detect max workers (Linux/macOS) unless overridden via CRYPTOSTORM_WORKERS
+if [[ -n "${CRYPTOSTORM_WORKERS:-}" ]]; then
+  WORKERS=${CRYPTOSTORM_WORKERS}
+else
+  if command -v getconf >/dev/null 2>&1; then
+    WORKERS=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+  elif command -v nproc >/dev/null 2>&1; then
+    WORKERS=$(nproc 2>/dev/null || echo 1)
+  elif command -v sysctl >/dev/null 2>&1; then
+    WORKERS=$(sysctl -n hw.ncpu 2>/dev/null || echo 1)
+  else
+    WORKERS=1
+  fi
+fi
+if [[ -z "$WORKERS" || "$WORKERS" -lt 1 ]]; then WORKERS=1; fi
+
 echo "[1/3] Validate config"
 python -m cryptostorm validate "$CONFIG" --no-require-env || true
 
@@ -117,7 +134,7 @@ if [[ "$ENSURE_DATA" == "1" ]]; then
 fi
 
 echo "[2/3] Realtime $( [[ "$ONCE" == "1" ]] && echo once || echo watch ) (online=$ONLINE)"
-RT_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --poll-offset-s "$POLL_OFFSET" --jitter-s "$JITTER" --log-level "$LOG_LEVEL")
+RT_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --poll-offset-s "$POLL_OFFSET" --jitter-s "$JITTER" --log-level "$LOG_LEVEL" --workers "$WORKERS")
 if [[ -n "$ARTIFACTS_DIR" ]]; then RT_ARGS+=(--artifacts "$ARTIFACTS_DIR"); fi
 if [[ "$ONCE" == "1" ]]; then RT_ARGS+=(--once); fi
 if [[ "$ONLINE" == "1" ]]; then RT_ARGS+=(--online-scoring); fi

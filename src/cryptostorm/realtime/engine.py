@@ -145,6 +145,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
     parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
     parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="5m")
+    parser.add_argument("--workers", type=int, default=0, help="Per-symbol parallel workers for features/backtest (0=auto)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -162,6 +163,15 @@ def main(argv: Optional[list[str]] = None) -> int:
     features_root = Path(args.features)
     artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
 
+    # Resolve workers (0=auto)
+    try:
+        import os as _os
+        workers = int(args.workers)
+        if workers <= 0:
+            workers = int(_os.cpu_count() or 1)
+    except Exception:
+        workers = 1
+
     if args.once:
         _cycle_start = time.monotonic()
         step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
@@ -170,11 +180,26 @@ def main(argv: Optional[list[str]] = None) -> int:
         t0 = time.monotonic()
         _retrieve_once(cfg, eff, data_root=data_root)
         t1 = time.monotonic()
-        if args.bar_interval == "15m":
-            from ..feature.engine import update_features_last_15m as _upd
-            _upd(eff, data_root=data_root, out_root=features_root)
+        # Feature append (parallel if workers>1)
+        if workers > 1:
+            from ..feature.engine import _parallel_features as _pf  # type: ignore
+
+            _pf(
+                eff,
+                data_root=data_root,
+                out_root=features_root,
+                now_ms=None,
+                interval=("15m" if args.bar_interval == "15m" else "5m"),
+                update_last=True,
+                workers=workers,
+                log_level=args.log_level,
+            )
         else:
-            update_features_last(eff, data_root=data_root, out_root=features_root)
+            if args.bar_interval == "15m":
+                from ..feature.engine import update_features_last_15m as _upd
+                _upd(eff, data_root=data_root, out_root=features_root)
+            else:
+                update_features_last(eff, data_root=data_root, out_root=features_root)
         t2 = time.monotonic()
         if args.online_scoring:
             from ..backtest.engine import score_online
@@ -185,6 +210,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 features_root=features_root,
                 out_root=artifacts_root,
                 features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+                workers=workers,
             )
         else:
             run_backtest(
@@ -193,6 +219,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 features_root=features_root,
                 out_root=artifacts_root,
                 features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+                workers=workers,
             )
         t3 = time.monotonic()
         # Optional alerts
@@ -256,18 +283,33 @@ def main(argv: Optional[list[str]] = None) -> int:
             t0 = time.monotonic()
             _retrieve_once(cfg, eff, data_root=data_root)
             t1 = time.monotonic()
-            if args.bar_interval == "15m":
-                from ..feature.engine import update_features_last_15m as _upd
-                _upd(eff, data_root=data_root, out_root=features_root)
+            # Feature append (parallel if workers>1)
+            if workers > 1:
+                from ..feature.engine import _parallel_features as _pf  # type: ignore
+
+                _pf(
+                    eff,
+                    data_root=data_root,
+                    out_root=features_root,
+                    now_ms=None,
+                    interval=("15m" if args.bar_interval == "15m" else "5m"),
+                    update_last=True,
+                    workers=workers,
+                    log_level=args.log_level,
+                )
             else:
-                update_features_last(eff, data_root=data_root, out_root=features_root)
+                if args.bar_interval == "15m":
+                    from ..feature.engine import update_features_last_15m as _upd
+                    _upd(eff, data_root=data_root, out_root=features_root)
+                else:
+                    update_features_last(eff, data_root=data_root, out_root=features_root)
             t2 = time.monotonic()
             if args.online_scoring:
                 from ..backtest.engine import score_online
 
-                score_online(cfg, eff, features_root=features_root, out_root=artifacts_root)
+                score_online(cfg, eff, features_root=features_root, out_root=artifacts_root, workers=workers)
             else:
-                run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root)
+                run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root, workers=workers)
             t3 = time.monotonic()
             if args.send_telegram:
                 from ..notify.telegram import main as telegram_main
