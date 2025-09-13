@@ -946,6 +946,7 @@ def run_retrieve(
                 # Use time-slicing for v4 when configured AND the requested window is larger than a single slice
                 window_ms = int(params["endTime"]) - int(params["startTime"])  # type: ignore[index]
                 if slice_days and _path_is_v4(path) and window_ms >= (slice_days * 24 * 60 * 60 * 1000):
+                    # Compute an effective slice size per dataset so each slice fits under the limit
                     slice_ms = slice_days * 24 * 60 * 60 * 1000
                     # Align the slice edges to the interval grid as well to avoid off-grid boundaries
                     step_ms_local = _canonical_interval_ms(ds_key, interval) or slice_ms
@@ -956,6 +957,15 @@ def run_retrieve(
                     # Many v4 endpoints expect a 'limit' even when using explicit start_time/end_time.
                     # Use the configured page_limit capped to 1000 to avoid server-side 400 "Internal error" responses.
                     eff_limit = max(1, min(1000, int(page_limit) if isinstance(page_limit, int) else 1000))
+                    # Clamp slice_days so that bars_per_slice <= eff_limit for the dataset interval
+                    try:
+                        bars_per_day = int((24 * 60 * 60 * 1000) // int(step_ms_local)) if int(step_ms_local) > 0 else 0
+                    except Exception:
+                        bars_per_day = 0
+                    if bars_per_day > 0:
+                        max_days_by_limit = max(1, int(eff_limit // bars_per_day))
+                        eff_slice_days = max(1, min(int(slice_days), max_days_by_limit))
+                        slice_ms = eff_slice_days * 24 * 60 * 60 * 1000
                     return _fetch_time_sliced(
                         base_url=target_base,
                         headers=headers2,
