@@ -70,6 +70,12 @@ def _make_grid(end_ms: int, days: int) -> List[int]:
     grid = list(range(start_aligned, end_aligned + 1, step))
     return grid
 
+def _make_grid_step(end_ms: int, days: int, step_ms: int) -> List[int]:
+    end_aligned = (end_ms - (end_ms % step_ms))
+    start_ms = end_aligned - days * 24 * 60 * 60 * 1000
+    start_aligned = (start_ms - (start_ms % step_ms))
+    return list(range(start_aligned, end_aligned + 1, step_ms))
+
 
 def _funding_series(data_dir: Path) -> Dict[int, float]:
     fp = data_dir / _output_filename("funding_8h")
@@ -93,7 +99,9 @@ def _funding_series(data_dir: Path) -> Dict[int, float]:
 
 
 def _ohlcv_series(data_dir: Path) -> Dict[int, Dict[str, float]]:
-    fp = data_dir / _output_filename("futures_ohlcv_5m")
+    # Prefer explicit 15m file if present, else 5m
+    fp15 = data_dir / "futures_ohlcv_15m.jsonl"
+    fp = fp15 if fp15.exists() else (data_dir / _output_filename("futures_ohlcv_5m"))
     out: Dict[int, Dict[str, float]] = {}
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -143,7 +151,9 @@ def _ohlcv_series(data_dir: Path) -> Dict[int, Dict[str, float]]:
 
 
 def _oi_series(data_dir: Path) -> Dict[int, float]:
-    fp = data_dir / _output_filename("oi_5m_ohlc")
+    # Prefer 15m file if present, else 5m
+    fp15 = data_dir / "oi_15m_ohlc.jsonl"
+    fp = fp15 if fp15.exists() else (data_dir / _output_filename("oi_5m_ohlc"))
     out: Dict[int, float] = {}
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -163,7 +173,8 @@ def _oi_series(data_dir: Path) -> Dict[int, float]:
 
 
 def _spot_close_series(data_dir: Path) -> Dict[int, float]:
-    fp = data_dir / _output_filename("spot_ohlcv_5m")
+    fp15 = data_dir / "spot_ohlcv_15m.jsonl"
+    fp = fp15 if fp15.exists() else (data_dir / _output_filename("spot_ohlcv_5m"))
     out: Dict[int, float] = {}
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -176,7 +187,12 @@ def _spot_close_series(data_dir: Path) -> Dict[int, float]:
 
 
 def _taker_series(data_dir: Path, dataset: str) -> Dict[int, Tuple[float, float]]:
-    fp = data_dir / _output_filename(dataset)
+    # Support 15m taker when requested
+    if dataset == "taker_futures_5m":
+        fp15 = data_dir / "taker_futures_15m.jsonl"
+        fp = fp15 if fp15.exists() else (data_dir / _output_filename(dataset))
+    else:
+        fp = data_dir / _output_filename(dataset)
     out: Dict[int, Tuple[float, float]] = {}
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -217,7 +233,8 @@ def _funding_pred_series(data_dir: Path) -> Dict[int, float]:
 
 
 def _liq_series(data_dir: Path) -> Dict[int, Tuple[float, float]]:
-    fp = data_dir / _output_filename("liquidation_5m")
+    fp15 = data_dir / "liquidation_15m.jsonl"
+    fp = fp15 if fp15.exists() else (data_dir / _output_filename("liquidation_5m"))
     out: Dict[int, Tuple[float, float]] = {}
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -282,7 +299,9 @@ def _last_leq(series: Mapping[int, Any], ts: int) -> Optional[Any]:
 # -------------------------
 
 def _load_orderbook_snaps(data_dir: Path) -> List[Tuple[int, Mapping[str, Any]]]:
-    fp = data_dir / _output_filename("orderbook_futures_5m")
+    # Prefer new snap name if present, else legacy 5m file
+    fp_snap = data_dir / "orderbook_futures_snap.jsonl"
+    fp = fp_snap if fp_snap.exists() else (data_dir / _output_filename("orderbook_futures_5m"))
     snaps: List[Tuple[int, Mapping[str, Any]]] = []
     for rec in _read_jsonl(fp):
         ts = rec.get("ts")
@@ -940,13 +959,205 @@ def build_features(
                     )
 
 
+def build_features_15m(
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    out_root: Path,
+    now_ms: Optional[int] = None,
+) -> None:
+    LOG = logging.getLogger("cryptostorm.feature")
+    now = now_ms if isinstance(now_ms, int) else _utc_now_ms()
+    step = 15 * 60 * 1000
+    grid = _make_grid_step(now, eff.days, step)
+    LOG.info("grid(15m): %d bars from %s to %s", len(grid), _ms_to_iso(grid[0] if grid else now), _ms_to_iso(grid[-1] if grid else now))
+    for sym in eff.symbols:
+        sym_dir = data_root / sym
+        fnd = _funding_series(sym_dir)
+        ohlcv = _ohlcv_series(sym_dir)
+        oi = _oi_series(sym_dir)
+        spot_close = _spot_close_series(sym_dir)
+        taker_perp = _taker_series(sym_dir, "taker_futures_5m")
+        taker_spot = _taker_series(sym_dir, "taker_spot_5m")
+        liq = _liq_series(sym_dir)
+        fund_pred = _funding_pred_series(sym_dir)
+
+        snaps_ob = _load_orderbook_snaps(sym_dir)
+        funding_vals_sorted = sorted([v for v in fnd.values() if isinstance(v, (int, float))])
+        oi_vals_sorted = sorted([v for v in oi.values() if isinstance(v, (int, float))])
+        def _pctile_rank(sorted_vals: List[float], x: Optional[float]) -> float:
+            if not sorted_vals or x is None or not isinstance(x, (int, float)):
+                return math.nan
+            import bisect
+            i = bisect.bisect_right(sorted_vals, float(x))
+            return i / len(sorted_vals)
+
+        def _twap(ts: int, series: Mapping[int, float], bars: int) -> float:
+            acc = 0.0
+            n = 0
+            t = ts - (bars - 1) * step
+            while t <= ts:
+                v = series.get(t)
+                if isinstance(v, (int, float)) and not math.isnan(v):
+                    acc += float(v)
+                    n += 1
+                t += step
+            return (acc / n) if n > 0 else math.nan
+
+        rows: List[Dict[str, Any]] = []
+        last_funding: Optional[float] = None
+        cvd_cum = 0.0
+        for ts in grid:
+            row: Dict[str, Any] = {
+                "ts": ts,
+                "symbol": sym,
+                "open": math.nan,
+                "high": math.nan,
+                "low": math.nan,
+                "close": math.nan,
+                "volume": math.nan,
+                "log_ret_15m": math.nan,
+                "funding_now": math.nan,
+                "funding_pctile_30d": math.nan,
+                "funding_pred_twap_60m": math.nan,
+                "oi_now": math.nan,
+                "oi_pctile_30d": math.nan,
+                "spread_bps": math.nan,
+                "depth_ratio": math.nan,
+                "basis_now": math.nan,
+                "basis_TWAP_60m": math.nan,
+                "basis_TWAP_120m": math.nan,
+                "taker_delta_15m": math.nan,
+                "cvd_perp": math.nan,
+                "cvd_perp_45m": math.nan,
+                "perp_share_60m": math.nan,
+                "liq_notional_15m": math.nan,
+                "liq_count_15m": math.nan,
+                "liq_notional_60m": math.nan,
+                "data_ok": True,
+            }
+
+            # OHLCV
+            if ts in ohlcv:
+                for k, v in ohlcv[ts].items():
+                    row[k] = v
+            else:
+                row["data_ok"] = False
+            # log return
+            try:
+                prev = ohlcv.get(ts - step, {}).get("close")
+                cur = ohlcv.get(ts, {}).get("close")
+                if isinstance(prev, (int, float)) and isinstance(cur, (int, float)) and prev > 0:
+                    row["log_ret_15m"] = math.log(float(cur) / float(prev))
+            except Exception:
+                pass
+
+            # Funding ffill and pctile
+            if ts in fnd:
+                last_funding = fnd[ts]
+            if isinstance(last_funding, (int, float)):
+                row["funding_now"] = float(last_funding)
+            row["funding_pctile_30d"] = _pctile_rank(funding_vals_sorted, last_funding if isinstance(last_funding, (int, float)) else None)
+            row["funding_pred_twap_60m"] = _twap(ts, fund_pred, 4)
+
+            # OI snapshot and pctile
+            oi_val = oi.get(ts) if ts in oi else _last_leq(oi, ts)
+            if isinstance(oi_val, (int, float)):
+                row["oi_now"] = float(oi_val)
+            row["oi_pctile_30d"] = _pctile_rank(oi_vals_sorted, oi_val if isinstance(oi_val, (int, float)) else None)
+
+            # Orderbook
+            max_age = eff.max_ob_age_s or 60
+            spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
+            if math.isnan(spread):
+                row["data_ok"] = False
+            row["spread_bps"] = spread
+            try:
+                row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
+            except Exception:
+                pass
+
+            # Basis and TWAPs
+            sc = spot_close.get(ts)
+            fc = ohlcv.get(ts, {}).get("close")
+            if isinstance(sc, (int, float)) and isinstance(fc, (int, float)) and sc != 0:
+                rel_now = (fc - sc) / sc
+                row["basis_now"] = rel_now
+                rel_series = {t: (ohlcv.get(t, {}).get("close") - spot_close.get(t)) / spot_close.get(t) for t in grid if isinstance(spot_close.get(t), (int, float)) and spot_close.get(t) != 0 and isinstance(ohlcv.get(t, {}).get("close"), (int, float))}
+                row["basis_TWAP_60m"] = _twap(ts, rel_series, 4)
+                row["basis_TWAP_120m"] = _twap(ts, rel_series, 8)
+
+            # Taker flows and CVD
+            if ts in taker_perp:
+                b, s = taker_perp[ts]
+                if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                    delta = float(b) - float(s)
+                    row["taker_delta_15m"] = delta
+                    cvd_cum += delta
+                    row["cvd_perp"] = cvd_cum
+            # 45m sum of deltas
+            last3 = []
+            t = ts - 2 * step
+            while t <= ts:
+                if t in taker_perp:
+                    b, s = taker_perp[t]
+                    if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                        last3.append(float(b) - float(s))
+                t += step
+            row["cvd_perp_45m"] = sum(last3) if last3 else math.nan
+            # Perp share 60m (4 bars) if spot taker is available
+            if taker_spot:
+                def _sum_abs(series: Mapping[int, Tuple[float, float]], bars: int) -> float:
+                    acc = 0.0
+                    t = ts - (bars - 1) * step
+                    while t <= ts:
+                        if t in series:
+                            b, s = series[t]
+                            acc += abs(float(b) - float(s))
+                        t += step
+                    return acc
+                perp_abs = _sum_abs(taker_perp, 4)
+                spot_abs = _sum_abs(taker_spot, 4)
+                denom = perp_abs + spot_abs
+                row["perp_share_60m"] = (perp_abs / denom) if denom > 0 else math.nan
+
+            # Liquidations 15m and 60m roll
+            if ts in liq:
+                n, c = liq[ts]
+                row["liq_notional_15m"] = n
+                row["liq_count_15m"] = c
+            acc = 0.0
+            t0 = ts - 3 * step
+            while t0 <= ts:
+                if t0 in liq:
+                    acc += float(liq[t0][0])
+                t0 += step
+            row["liq_notional_60m"] = acc if acc > 0 else math.nan
+
+            rows.append(row)
+
+        out_dir = out_root / sym
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_fp = out_dir / "features_15m.csv"
+        cols = [
+            "ts","symbol","open","high","low","close","volume","log_ret_15m","funding_now","funding_pctile_30d","funding_pred_twap_60m","oi_now","oi_pctile_30d","spread_bps","depth_ratio","basis_now","basis_TWAP_60m","basis_TWAP_120m","taker_delta_15m","cvd_perp","cvd_perp_45m","perp_share_60m","liq_notional_15m","liq_count_15m","liq_notional_60m","data_ok",
+        ]
+        with out_fp.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=cols)
+            w.writeheader()
+            for r in rows:
+                w.writerow(r)
+        LOG.info("%s 15m features built: %d rows -> %s", sym, len(rows), out_fp)
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm feature engineering")
     parser.add_argument("config", type=str)
     parser.add_argument("--data", type=str, default="data", help="Input data root")
     parser.add_argument("--out", type=str, default="features", help="Output features root")
     parser.add_argument("--log-level", type=str, default="INFO")
-    parser.add_argument("--update-last", action="store_true", help="Append exactly one latest 5m row per symbol")
+    parser.add_argument("--update-last", action="store_true", help="Append exactly one latest row per symbol")
+    parser.add_argument("--interval", type=str, choices=["5m", "15m"], default="15m", help="Feature cadence to build (default: 15m)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -957,11 +1168,232 @@ def main(argv: Optional[List[str]] = None) -> int:
             print(f"error: {e}")
         return 2
     if args.update_last:
-        update_features_last(eff, data_root=Path(args.data), out_root=Path(args.out))
+        if args.interval == "15m":
+            update_features_last_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
+        else:
+            update_features_last(eff, data_root=Path(args.data), out_root=Path(args.out))
     else:
-        build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
+        if args.interval == "15m":
+            build_features_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
+        else:
+            build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
     return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+# -------------------------
+# 15m incremental features (single-row append)
+# -------------------------
+
+def update_features_last_15m(
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    out_root: Path,
+    now_ms: Optional[int] = None,
+) -> None:
+    LOG = logging.getLogger("cryptostorm.feature")
+    now = now_ms if isinstance(now_ms, int) else _utc_now_ms()
+    step = 15 * 60 * 1000
+    ts = now - (now % step)
+    for sym in eff.symbols:
+        sym_dir = data_root / sym
+        # Load series (prefer explicit 15m files if present; else 5m)
+        fnd = _funding_series(sym_dir)
+        ohlcv = _ohlcv_series(sym_dir)
+        oi = _oi_series(sym_dir)
+        spot_close = _spot_close_series(sym_dir)
+        taker_perp = _taker_series(sym_dir, "taker_futures_5m")  # 15m file auto-detected when present
+        taker_spot = _taker_series(sym_dir, "taker_spot_5m")
+        liq = _liq_series(sym_dir)
+        fund_pred = _funding_pred_series(sym_dir)
+
+        funding_vals_sorted = sorted([v for v in fnd.values() if isinstance(v, (int, float))])
+        oi_vals_sorted = sorted([v for v in oi.values() if isinstance(v, (int, float))])
+        def _pctile_rank(sorted_vals: List[float], x: Optional[float]) -> float:
+            if not sorted_vals or x is None or not isinstance(x, (int, float)):
+                return math.nan
+            import bisect
+            i = bisect.bisect_right(sorted_vals, float(x))
+            return i / len(sorted_vals)
+
+        row: Dict[str, Any] = {
+            "ts": ts,
+            "symbol": sym,
+            "open": math.nan,
+            "high": math.nan,
+            "low": math.nan,
+            "close": math.nan,
+            "volume": math.nan,
+            "funding_now": math.nan,
+            "oi_now": math.nan,
+            "spread_bps": math.nan,
+            "basis_now": math.nan,
+            "basis_TWAP_60m": math.nan,
+            "basis_TWAP_120m": math.nan,
+            "funding_pctile_30d": math.nan,
+            "funding_pred_twap_60m": math.nan,
+            "oi_pctile_30d": math.nan,
+            "taker_delta_15m": math.nan,
+            "cvd_perp": math.nan,
+            "cvd_perp_45m": math.nan,
+            "perp_share_60m": math.nan,
+            "depth_ratio": math.nan,
+            "liq_notional_15m": math.nan,
+            "liq_count_15m": math.nan,
+            "liq_notional_60m": math.nan,
+            "log_ret_15m": math.nan,
+            "data_ok": True,
+        }
+
+        # OHLCV: prefer exact 15m bar; if missing, leave data_ok false
+        if ts in ohlcv:
+            for k, v in ohlcv[ts].items():
+                row[k] = v
+        else:
+            row["data_ok"] = False
+
+        # log return for RV
+        try:
+            prev = ohlcv.get(ts - step, {}).get("close")
+            cur = ohlcv.get(ts, {}).get("close")
+            if isinstance(prev, (int, float)) and isinstance(cur, (int, float)) and prev > 0:
+                row["log_ret_15m"] = math.log(float(cur) / float(prev))
+        except Exception:
+            pass
+
+        # Funding ffill
+        last_funding = _last_leq(fnd, ts)
+        if isinstance(last_funding, (int, float)):
+            row["funding_now"] = float(last_funding)
+        row["funding_pctile_30d"] = _pctile_rank(funding_vals_sorted, last_funding if isinstance(last_funding, (int, float)) else None)
+        # Pred funding TWAP 60m over 4 bars
+        def _twap(series: Mapping[int, float], bars: int) -> float:
+            acc = 0.0
+            n = 0
+            t = ts - (bars - 1) * step
+            while t <= ts:
+                v = series.get(t)
+                if isinstance(v, (int, float)) and not math.isnan(v):
+                    acc += float(v)
+                    n += 1
+                t += step
+            return (acc / n) if n > 0 else math.nan
+        row["funding_pred_twap_60m"] = _twap(fund_pred, 4)
+
+        # OI snapshot + percentile (last at/≤ ts)
+        oi_val = oi.get(ts) if ts in oi else _last_leq(oi, ts)
+        if isinstance(oi_val, (int, float)):
+            row["oi_now"] = float(oi_val)
+        row["oi_pctile_30d"] = _pctile_rank(oi_vals_sorted, oi_val if isinstance(oi_val, (int, float)) else None)
+
+        # OB spread/depth
+        max_age = eff.max_ob_age_s or 60
+        snaps_ob = _load_orderbook_snaps(sym_dir)
+        spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
+        if math.isnan(spread):
+            row["data_ok"] = False
+        row["spread_bps"] = spread
+        try:
+            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
+        except Exception:
+            pass
+
+        # Basis
+        sc = spot_close.get(ts)
+        fc = ohlcv.get(ts, {}).get("close")
+        if isinstance(sc, (int, float)) and isinstance(fc, (int, float)) and sc != 0:
+            basis_now = (fc - sc) / sc
+            row["basis_now"] = basis_now
+            # 60m/120m = 4/8 bars at 15m
+            def _rel_series() -> Mapping[int, float]:
+                d: Dict[int, float] = {}
+                for t in spot_close.keys():
+                    scv = spot_close.get(t)
+                    fcv = ohlcv.get(t, {}).get("close")
+                    if isinstance(scv, (int, float)) and scv != 0 and isinstance(fcv, (int, float)):
+                        d[int(t)] = (fcv - scv) / scv
+                return d
+            rel = _rel_series()
+            row["basis_TWAP_60m"] = _twap(rel, 4)
+            row["basis_TWAP_120m"] = _twap(rel, 8)
+
+        # Taker flows + CVD (3 bars = 45m)
+        if ts in taker_perp:
+            b, s = taker_perp[ts]
+            if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                delta = float(b) - float(s)
+                row["taker_delta_15m"] = delta
+        # cumulative CVD over window (30d)
+        cvd = 0.0
+        t = ts - eff.days * 24 * 60 * 60 * 1000
+        t = t - (t % step)
+        while t <= ts:
+            if t in taker_perp:
+                b, s = taker_perp[t]
+                if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                    cvd += float(b) - float(s)
+            t += step
+        row["cvd_perp"] = cvd
+        # last 3 deltas (45m)
+        last3 = []
+        t = ts - 2 * step
+        while t <= ts:
+            if t in taker_perp:
+                b, s = taker_perp[t]
+                if isinstance(b, (int, float)) and isinstance(s, (int, float)):
+                    last3.append(float(b) - float(s))
+            t += step
+        row["cvd_perp_45m"] = sum(last3) if last3 else math.nan
+        # Share: denominator optional (coin-aggregated) — not implemented here; leave NaN or synthesize in future
+
+        # Liquidations 15m + 60m roll (4 bars)
+        if ts in liq:
+            n, c = liq[ts]
+            row["liq_notional_15m"] = n
+            row["liq_count_15m"] = c
+        acc = 0.0
+        t0 = ts - 3 * step
+        while t0 <= ts:
+            if t0 in liq:
+                acc += float(liq[t0][0])
+            t0 += step
+        row["liq_notional_60m"] = acc if acc > 0 else math.nan
+
+        # Append
+        out_dir = out_root / sym
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_fp = out_dir / "features_15m.csv"
+        cols = [
+            "ts","symbol","open","high","low","close","volume","log_ret_15m","funding_now","funding_pctile_30d","funding_pred_twap_60m","oi_now","oi_pctile_30d","spread_bps","depth_ratio","basis_now","basis_TWAP_60m","basis_TWAP_120m","taker_delta_15m","cvd_perp","cvd_perp_45m","perp_share_60m","liq_notional_15m","liq_count_15m","liq_notional_60m","data_ok",
+        ]
+        last_ts_existing: Optional[int] = None
+        if out_fp.exists():
+            try:
+                with out_fp.open("r", encoding="utf-8") as f:
+                    lines = f.read().splitlines()
+                    if len(lines) >= 2:
+                        for line in reversed(lines[1:]):
+                            if line.strip():
+                                parts = line.split(",", 2)
+                                try:
+                                    last_ts_existing = int(parts[0])
+                                except Exception:
+                                    last_ts_existing = None
+                                break
+            except Exception:
+                last_ts_existing = None
+        if last_ts_existing == ts:
+            LOG.info("%s 15m features: latest row already present (ts=%s)", sym, _ms_to_iso(ts))
+            continue
+        import csv as _csv
+        write_header = not out_fp.exists()
+        with out_fp.open("a", newline="", encoding="utf-8") as f:
+            w = _csv.DictWriter(f, fieldnames=cols)
+            if write_header:
+                w.writeheader()
+            w.writerow(row)
+        LOG.info("%s appended 15m features row ts=%s -> %s", sym, _ms_to_iso(ts), out_fp)
