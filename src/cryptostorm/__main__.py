@@ -150,6 +150,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         ),
     )
     p_uni.add_argument("--top", type=int, default=100)
+    p_uni.add_argument("--data", type=str, default="data")
     p_uni.add_argument("--rps", type=float, default=5.0)
     p_uni.add_argument("--out", type=str, help="Path to YAML config to write/update")
     p_uni.add_argument("--print", action="store_true")
@@ -354,7 +355,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     # Hidden utility: select top Binance USDT-perps and update a config's universe.symbols
     if args.cmd == "binance-top":  # pragma: no cover
-        argv = ["--top", str(args.top), "--rps", str(args.rps)]
+        argv = ["--top", str(args.top), "--data", args.data, "--rps", str(args.rps)]
         if args.out:
             argv += ["--out", args.out]
         if args.print:

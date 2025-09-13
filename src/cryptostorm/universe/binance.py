@@ -143,13 +143,120 @@ def _metrics_for_symbol(symbol: str, end_ms: int, rps_delay_s: float) -> Tuple[f
 
     return vol30, vol7, ret30, rv30, valid, zero_days, vol24
 
-def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = False) -> List[RankRow]:
-    # Base filter only: USDT‑M PERPETUAL, TRADING (no region/microstructure/oi gates)
-    symbols = _futures_usdt_perp_symbols(verbose=verbose)
+def _symbols_from_data(data_root: Path, verbose: bool = False) -> List[str]:
+    out: List[str] = []
+    if not data_root.exists():
+        return out
+    for p in sorted(data_root.iterdir()):
+        if not p.is_dir():
+            continue
+        name = p.name
+        if not name.endswith("USDT"):
+            continue
+        # Consider symbols that have futures OHLCV captured
+        if (p / "futures_ohlcv_15m.jsonl").exists() or (p / "futures_ohlcv_5m.jsonl").exists():
+            out.append(name)
+    if verbose:
+        print(f"[binance-top] Found {len(out)} symbols from local Coinglass data at {data_root}", flush=True)
+    return out
+
+
+def _coinglass_local_metrics(symbol: str, data_root: Path, now_ms: Optional[int] = None) -> Tuple[float, float, float, float, int, int]:
+    """Compute vol30d (USD), vol24h (USD), vol7d(USD), ret30d (log), rv30d (annualized), valid_days, zero_days
+    from local Coinglass JSONL (prefer 15m, fallback 5m).
+    """
+    root = data_root / symbol
+    path = root / "futures_ohlcv_15m.jsonl"
+    interval_min = 15
+    if not path.exists():
+        path = root / "futures_ohlcv_5m.jsonl"
+        interval_min = 5
+    if not path.exists():
+        return 0.0, 0.0, 0.0, 0.0, 0, 0
+
+    end_ms = int(now_ms or (time.time() * 1000))
+    start30 = end_ms - 30 * 24 * 60 * 60 * 1000
+    start7 = end_ms - 7 * 24 * 60 * 60 * 1000
+    start24 = end_ms - 24 * 60 * 60 * 1000
+
+    vol30 = 0.0
+    vol7 = 0.0
+    vol24 = 0.0
+    closes: List[float] = []
+    days_seen: set = set()
+    zero_days: Dict[str, float] = {}
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                ts = int(obj.get("ts") or 0)
+                if ts < start30:
+                    continue
+                payload = obj.get("payload") or {}
+                try:
+                    v_usd = float(payload.get("volume_usd") or 0.0)
+                except Exception:
+                    v_usd = 0.0
+                try:
+                    close = float(payload.get("close") or 0.0)
+                except Exception:
+                    close = 0.0
+                # day key
+                try:
+                    d = datetime.utcfromtimestamp(ts / 1000).strftime("%Y-%m-%d")
+                except Exception:
+                    d = ""
+                if d:
+                    days_seen.add(d)
+                    zero_days[d] = zero_days.get(d, 0.0) + v_usd
+                if v_usd > 0:
+                    vol30 += v_usd
+                    if ts >= start7:
+                        vol7 += v_usd
+                    if ts >= start24:
+                        vol24 += v_usd
+                if close > 0:
+                    closes.append(close)
+    except Exception:
+        return 0.0, 0.0, 0.0, 0.0, 0, 0
+
+    # Compute returns/rv from bar closes (approximate from 15m/5m)
+    ret30 = 0.0
+    rv30 = 0.0
+    if len(closes) >= 2:
+        rets: List[float] = []
+        for i in range(1, len(closes)):
+            c0 = closes[i - 1]
+            c1 = closes[i]
+            if c0 > 0 and c1 > 0:
+                rets.append(math.log(c1 / c0))
+        if rets:
+            ret30 = float(sum(rets))
+            m = sum(rets) / len(rets)
+            rv_bar = (sum((x - m) ** 2 for x in rets) / len(rets)) ** 0.5
+            bars_per_year = 365.0 * 24.0 * 60.0 / float(interval_min)
+            rv30 = float(rv_bar * math.sqrt(bars_per_year))
+    valid_days = len(days_seen)
+    zero_count = sum(1 for _, vv in zero_days.items() if vv == 0.0)
+    return vol30, vol24, vol7, ret30, rv30, valid_days
+
+
+def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = False, data_root: Optional[Path] = None) -> List[RankRow]:
+    # Prefer local Coinglass data for candidates and metrics if present
+    symbols: List[str] = []
+    if data_root is not None:
+        symbols = _symbols_from_data(data_root, verbose=verbose)
+    if not symbols:
+        # Fallback to Binance symbol list (may fail behind 418)
+        symbols = _futures_usdt_perp_symbols(verbose=verbose)
     if not symbols:
         if verbose:
-            print("[binance-top] No symbols fetched.", flush=True)
+            print("[binance-top] No symbols available from data or Binance", flush=True)
         return []
+    # At this point, 'symbols' contains either local candidates from data/ or Binance list
     # Optional test limiter to reduce calls in dev/CI
     try:
         max_cand = int(os.getenv("CRYPTOSTORM_UNIVERSE_MAX_CANDIDATES", "0") or "0")
@@ -167,20 +274,12 @@ def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = Fals
     step = max(1, n // 20)
     t0 = time.time()
     for i, sym in enumerate(symbols):
-        vol30, vol7, ret30, rv30, valid, zero_days, vol24 = _metrics_for_symbol(sym, end_ms, delay)
-        rows.append(
-            RankRow(
-                symbol=sym,
-                vol30d_quote=vol30,
-                vol7d_quote=vol7,
-                vol24h_quote=vol24,
-                ret30d=ret30,
-                rv30d=rv30,
-                valid_days=valid,
-                zero_volume_days=zero_days,
-            )
-        )
-        if delay > 0:
+        if data_root is not None and (data_root / sym).exists():
+            vol30, vol24, vol7, ret30, rv30, valid = _coinglass_local_metrics(sym, data_root, now_ms=end_ms)
+        else:
+            vol30, vol7, ret30, rv30, valid, zero_days, vol24 = _metrics_for_symbol(sym, end_ms, delay)
+        rows.append(RankRow(symbol=sym, vol30d_quote=vol30, vol7d_quote=vol7, vol24h_quote=vol24, ret30d=ret30, rv30d=rv30, valid_days=valid))
+        if delay > 0 and (data_root is None or not (data_root / sym).exists()):
             time.sleep(delay)
         if verbose and (i % step == 0 or i == n - 1):
             pct = int((i + 1) * 100 / n)
@@ -277,15 +376,17 @@ def _update_config_symbols(path: Path, symbols: Sequence[str]) -> None:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Select top Binance USDT‑perp symbols and update config")
     parser.add_argument("--top", type=int, default=100, help="How many symbols to select")
-    parser.add_argument("--rps", type=float, default=5.0, help="Binance API requests per second pacing")
+    parser.add_argument("--data", type=str, default="data", help="Path to local Coinglass data directory (preferred)")
+    parser.add_argument("--rps", type=float, default=5.0, help="Binance API requests per second pacing (only used if no local data)")
     parser.add_argument("--out", type=str, help="Path to YAML config to write (updates universe.symbols)")
     parser.add_argument("--print", action="store_true", help="Print the symbol list to stdout")
     parser.add_argument("--ai", action="store_true", help="Use OpenAI to rank the candidates (requires OPENAI_API_KEY)")
     parser.add_argument("--openai-model", type=str, default="gpt-4o-mini", help="OpenAI chat model for ranking")
     args = parser.parse_args(argv)
 
-    # Build simple deterministic ranking
-    rows = select_top_binance_perps(args.top * (2 if args.ai else 1), rps=args.rps, verbose=True)
+    # Build simple deterministic ranking (prefer local Coinglass data)
+    data_root = Path(args.data) if args.data else None
+    rows = select_top_binance_perps(args.top * (2 if args.ai else 1), rps=args.rps, verbose=True, data_root=data_root)
 
     # Optional AI refinement over a bounded pool
     if args.ai and rows:
