@@ -178,7 +178,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
     parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
-    parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="5m")
+    parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
     parser.add_argument("--workers", type=int, default=0, help="Per-symbol parallel workers for features/backtest (0=auto)")
     parser.add_argument("--coinglass-rps", type=float, default=4.1667, help="Global Coinglass request rate (req/s), capped to ~250/min")
     args = parser.parse_args(argv)

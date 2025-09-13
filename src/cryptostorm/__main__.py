@@ -137,7 +137,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_mon.add_argument("--data", type=str, default="data")
     p_mon.add_argument("--features", type=str, default="features")
     p_mon.add_argument("--artifacts", type=str)
-    p_mon.add_argument("--datasets", type=str, default="futures_ohlcv_5m,oi_5m_ohlc,orderbook_futures_5m")
+    p_mon.add_argument("--datasets", type=str, default="futures_ohlcv_15m,oi_15m_ohlc")
     p_mon.add_argument("--symbols", type=int, default=20)
     p_mon.add_argument("--refresh-s", type=float, default=2.0)
     p_mon.add_argument("--view", type=str, choices=["data", "alerts"], default="data")
