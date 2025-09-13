@@ -260,7 +260,7 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], scores: List[Dict[str
     const chartMid = makeChart(midEl);
 
     const priceLineData = candles.map(c => ({{ time: c.time, value: c.close }}));
-    const priceLine = chartTop.addLineSeries({{ color:'#9bd', lineWidth:2 }});
+    const priceLine = chartTop.addLineSeries({{ color:'#888', lineWidth:2 }});
     if (priceLineData.length) {{
       priceLine.setData(priceLineData);
       if (markers.length) priceLine.setMarkers(markers);
