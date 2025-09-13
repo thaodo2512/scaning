@@ -49,6 +49,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_aud.add_argument("--min-ratio", type=float, default=0.95)
     p_aud.add_argument("--debug", action="store_true")
     p_aud.add_argument("--show-missing", type=int, default=5)
+    p_aud.add_argument("--soft-fail", action="store_true")
 
     p_feat = sub.add_parser("feature", help="Build feature tables from raw data")
     p_feat.add_argument("config", type=str)
@@ -216,6 +217,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv.append("--debug")
         if args.show_missing is not None:
             argv += ["--show-missing", str(args.show_missing)]
+        if args.soft_fail:
+            argv.append("--soft-fail")
         return audit_main(argv)
 
     if args.cmd == "feature":
