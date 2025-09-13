@@ -50,11 +50,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_aud.add_argument("--debug", action="store_true")
     p_aud.add_argument("--show-missing", type=int, default=5)
 
-    p_feat = sub.add_parser("feature", help="Build 5m feature tables from raw data")
+    p_feat = sub.add_parser("feature", help="Build feature tables from raw data")
     p_feat.add_argument("config", type=str)
     p_feat.add_argument("--data", type=str, default="data")
     p_feat.add_argument("--out", type=str, default="features")
     p_feat.add_argument("--log-level", type=str, default="INFO")
+    p_feat.add_argument("--interval", type=str, choices=["5m", "15m"], default="15m")
+    p_feat.add_argument("--update-last", action="store_true")
+    p_feat.add_argument("--workers", type=int, default=1)
 
     p_bt = sub.add_parser("backtest", help="Run walk-forward IsolationForest backtest")
     p_bt.add_argument("config", type=str)
@@ -214,7 +217,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         return audit_main(argv)
 
     if args.cmd == "feature":
-        return feature_main([args.config, "--data", args.data, "--out", args.out, "--log-level", args.log_level])
+        argv = [args.config, "--data", args.data, "--out", args.out, "--log-level", args.log_level, "--interval", args.interval]
+        if args.update_last:
+            argv.append("--update-last")
+        if int(args.workers) > 1:
+            argv += ["--workers", str(int(args.workers))]
+        return feature_main(argv)
 
     if args.cmd == "backtest":
         argv = [args.config, "--features", args.features, "--features-interval", args.features_interval]

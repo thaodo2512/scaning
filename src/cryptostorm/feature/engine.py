@@ -672,6 +672,75 @@ def _alignment_stats(name: str, series_keys: Iterable[int], step_ms: int = 5 * 6
         return f"{name}: alignment=n/a"
 
 
+# -------------------------
+# Parallel helpers (per-symbol workers)
+# -------------------------
+def _clone_eff_for_symbols(eff: EffectiveConfig, symbols: List[str]) -> EffectiveConfig:
+    from dataclasses import replace
+
+    sub_map = {k: v for k, v in eff.symbol_to_coin.items() if k in symbols}
+    return replace(eff, symbols=list(symbols), symbol_to_coin=sub_map)
+
+
+def _run_mode_for_symbol(
+    mode: str,
+    eff: EffectiveConfig,
+    data_root: Path,
+    out_root: Path,
+    now_ms: Optional[int],
+    symbol: str,
+) -> str:
+    eff1 = _clone_eff_for_symbols(eff, [symbol])
+    if mode == "build_5m":
+        build_features(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
+    elif mode == "build_15m":
+        build_features_15m(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
+    elif mode == "update_5m":
+        update_features_last(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
+    elif mode == "update_15m":
+        update_features_last_15m(eff1, data_root=data_root, out_root=out_root, now_ms=now_ms)
+    else:  # pragma: no cover - defensive
+        raise ValueError(f"unknown mode: {mode}")
+    return symbol
+
+
+def _parallel_features(
+    eff: EffectiveConfig,
+    *,
+    data_root: Path,
+    out_root: Path,
+    now_ms: Optional[int],
+    interval: str,
+    update_last: bool,
+    workers: int,
+) -> None:
+    import concurrent.futures as cf
+    import os as _os
+    LOG = logging.getLogger("cryptostorm.feature")
+
+    mode = (
+        ("update_15m" if interval == "15m" else "update_5m")
+        if update_last
+        else ("build_15m" if interval == "15m" else "build_5m")
+    )
+    symbols = list(eff.symbols)
+    max_workers = int(workers if workers and workers > 0 else (_os.cpu_count() or 1))
+    max_workers = max(1, max_workers)
+    LOG.info("parallel features: mode=%s symbols=%d workers=%d", mode, len(symbols), max_workers)
+
+    with cf.ProcessPoolExecutor(max_workers=max_workers) as ex:
+        fut_to_sym = {
+            ex.submit(_run_mode_for_symbol, mode, eff, data_root, out_root, now_ms, s): s
+            for s in symbols
+        }
+        for fut in cf.as_completed(fut_to_sym):
+            sym = fut_to_sym[fut]
+            try:
+                fut.result()
+            except Exception as e:  # noqa: BLE001
+                LOG.warning("feature task failed for %s: %s", sym, e)
+
+
 def build_features(
     eff: EffectiveConfig,
     *,
@@ -1158,6 +1227,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--log-level", type=str, default="INFO")
     parser.add_argument("--update-last", action="store_true", help="Append exactly one latest row per symbol")
     parser.add_argument("--interval", type=str, choices=["5m", "15m"], default="15m", help="Feature cadence to build (default: 15m)")
+    parser.add_argument("--workers", type=int, default=1, help="Worker processes for per-symbol parallelism (default: 1)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -1167,16 +1237,27 @@ def main(argv: Optional[List[str]] = None) -> int:
         for e in errs:
             print(f"error: {e}")
         return 2
-    if args.update_last:
-        if args.interval == "15m":
-            update_features_last_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
-        else:
-            update_features_last(eff, data_root=Path(args.data), out_root=Path(args.out))
+    if int(args.workers) > 1:
+        _parallel_features(
+            eff,
+            data_root=Path(args.data),
+            out_root=Path(args.out),
+            now_ms=None,
+            interval=args.interval,
+            update_last=bool(args.update_last),
+            workers=int(args.workers),
+        )
     else:
-        if args.interval == "15m":
-            build_features_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
+        if args.update_last:
+            if args.interval == "15m":
+                update_features_last_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
+            else:
+                update_features_last(eff, data_root=Path(args.data), out_root=Path(args.out))
         else:
-            build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
+            if args.interval == "15m":
+                build_features_15m(eff, data_root=Path(args.data), out_root=Path(args.out))
+            else:
+                build_features(eff, data_root=Path(args.data), out_root=Path(args.out))
     return 0
 
 

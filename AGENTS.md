@@ -46,14 +46,14 @@
 - Prefer `rg` for search; read files in ≤250-line chunks.
 - Do not add dependencies without justification; update docs when adding files.
 
-## Realtime Phases Implemented (v1)
+## Realtime Phases Implemented (v2)
 
-This repository now includes a complete Phase 0–5 realtime implementation with the following additions:
+This repository now includes a complete Phase 0–5 realtime implementation with 15m as the default cadence:
 
 - Phase 1 — Incremental Features + Realtime Loop
-  - `feature --update-last` appends exactly one 5‑minute row per symbol.
-  - `realtime` subcommand runs retrieve → features(update-last) → backtest in a 5‑minute aligned loop (supports `--once`).
-  - Script: `scripts/run_realtime.sh` (validate → realtime → report).
+  - `feature --interval 15m --update-last` appends exactly one 15‑minute row per symbol (5m still supported).
+  - `realtime` runs retrieve → features(update-last) → backtest, aligned to `--bar-interval {5m|15m}` (supports `--once`).
+  - Script: `scripts/run_e2e.sh` (validate → retrieve → build 15m features → backtest → audit → report).
 
 - Phase 2 — Watch Mode + RPS Limiter + File State
   - `retrieve --watch --workers N --rps R` with global token‑bucket limiter.
@@ -74,12 +74,14 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 ## New/Updated CLI Commands
 
-- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert]`
+- `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert --bar-interval 5m|15m]`
 - `python -m cryptostorm retrieve <config> --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2 [--once]`
-- `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online]`
+- `python -m cryptostorm feature <config> --data data --out features [--interval 5m|15m] [--update-last]`
+- `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online] [--features-interval 5m|15m|auto]`
 - `python -m cryptostorm api <config> [--data data --features features --artifacts <dir> --reports reports --host 0.0.0.0 --port 8000 --token TOKEN]`
 - `python -m cryptostorm storage export-parquet <config> --data data --features features --out parquet`
 - `python -m cryptostorm storage emit-ddl <config> --kind clickhouse|timescale --out ./ddl`
+- `python -m cryptostorm binance-top --top 50 [--ai --openai-model gpt-4o-mini --rps 5.0 --out configs/realtime.yaml --print]`
 - Reports:
   - Lightweight Charts: `python -m cryptostorm report <config> --data data --features features --out reports`
   - Plotly full: `python -m cryptostorm report-plotly <config> --data data --out reports`
@@ -107,6 +109,22 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 ## Ops Notes (2025‑09‑12)
 
+Updated behaviors (2025‑09‑13):
+
+- 15m defaults
+  - E2E builds `features_15m.csv` and backtests on 15m by default.
+  - Realtime passes the matching features cadence to backtest/online scoring via `--bar-interval`.
+- Retrieval performance + robustness
+  - Default `slice_days: 10` in configs; retriever clamps effective slice per interval so bars_per_slice ≤ API limit (≤1000). This reduces calls for 15m while staying safe for 5m.
+  - Failure‑only HTTP dumps: on WARN/ERROR, logs full URL/status/response (DEBUG); success‑path HTTP logs only with `CRYPTOSTORM_HTTP_DEBUG=all`.
+  - Strict empty handling: set `CRYPTOSTORM_STRICT_EMPTY=1` to treat 0‑item responses (after fallback) as errors that fail retrieval.
+- Audit soft‑fail
+  - `python -m cryptostorm audit ... --soft-fail` reports missing coverage but exits 0. The E2E script uses soft‑fail by default so the pipeline continues.
+- Telegram spam controls
+  - Defaults standardized in configs: `kinds: storm,pre_alert`, `only_new: true`, `include_json: true`, `cooldown_min`, `limit`.
+- Universe tool (Binance)
+  - `binance-top` fetches USDT‑perps and ranks by 30d/24h quote volume; optional AI ranking via OpenAI (`--ai --openai-model`), then updates `universe.symbols`.
+
 - Telegram Alerts
   - Secrets are read from `secrets/telegram_bot_token.txt` and `secrets/telegram_chat_id.txt` via `configs/realtime.yaml`.
   - Realtime now sends Telegram alerts by default (compose includes `--send-telegram --telegram-kinds storm,pre_alert`).
@@ -114,25 +132,23 @@ This repository now includes a complete Phase 0–5 realtime implementation with
     - `TOKEN=$(<secrets/telegram_bot_token.txt); CHAT_ID=$(<secrets/telegram_chat_id.txt); curl -sS -X POST "https://api.telegram.org/bot${TOKEN}/sendMessage" -d chat_id="${CHAT_ID}" --data-urlencode text="Buzz test" -d disable_notification=false`
   - Dry‑run sender (no network): `PYTHONPATH=src python -m cryptostorm alert-telegram configs/realtime.yaml --dry-run`.
 
-- Realtime Run (online scoring)
-  - One‑time seed models for online scoring:
-    - `docker compose run --rm backfill bash -lc 'python -m cryptostorm retrieve configs/realtime.yaml --out data && python -m cryptostorm feature configs/realtime.yaml --data data --out features && python -m cryptostorm backtest configs/realtime.yaml --features features --artifacts-root artifacts/realtime'`
-  - Start continuous realtime (5m‑aligned, Telegram on, builds reports):
-    - `docker compose up realtime`
-  - One‑shot cycle (single run + reports + Telegram):
-    - `docker compose run --rm backfill bash -lc 'scripts/run_realtime.sh -c configs/realtime.yaml --online --once --build-reports --send-telegram --telegram-kinds storm,pre_alert'`
+- Realtime & E2E
+  - E2E pipeline (15m): `bash scripts/run_e2e.sh -c configs/realtime.yaml -l INFO`
+    - Strict mode: `CRYPTOSTORM_STRICT_EMPTY=1 bash scripts/run_e2e.sh -c configs/realtime.yaml -l DEBUG`
+  - Realtime single cycle: `python -m cryptostorm realtime configs/realtime.yaml --once --bar-interval 15m`
+  - Continuous realtime (compose): `docker compose up realtime`
 
 - Docker/Compose Test Commands
   - Docker: `docker build -t cryptostorm:tests . && docker run --rm -v "$PWD:/app" -w /app cryptostorm:tests pytest -q`
   - Compose: `docker compose build backfill && docker compose run --rm backfill pytest -q`
   - Live tests: add `-e RUN_LIVE_COINGLASS=1` and API key env or file.
 
-- Changes in this iteration
-  - Added `tests/test_notify_telegram.py` (dry‑run + only‑new registry).
-  - Made `run_retrieve(..., v3_base_url)` optional; defaults internally.
-  - Enabled Telegram in `docker-compose.yml` realtime by default (`--send-telegram`).
-  - README updated with Docker/Compose test commands.
-  - History cleaned: removed tracked `features/` and scrubbed `secrets/coinglass_api_key.txt` from history. Force‑push required after rewrite.
+-- Changes in this iteration
+  - 15m features default; E2E builds 15m and backtests on 15m.
+  - Retrieval: strict empty handling (opt‑in), failure‑only HTTP dumps, dynamic slice clamp; default `slice_days: 10` in configs.
+  - Realtime: passes cadence explicitly to backtest/online scoring; Telegram defaults standardized.
+  - Audit: `--soft-fail` added; E2E uses soft‑fail.
+  - Universe: added `binance-top` with optional OpenAI‑assisted ranking.
 
 - Troubleshooting
   - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_5m: 1`, `storm_confirm_k_5m.default: 1` for a demo; re‑seed models, then run realtime.
