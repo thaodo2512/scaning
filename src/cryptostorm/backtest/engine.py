@@ -7,7 +7,6 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
-import json
 import pickle
 
 from ..config import EffectiveConfig, load_config, validate_config

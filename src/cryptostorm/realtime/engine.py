@@ -13,9 +13,7 @@ from ..config import load_config, validate_config, EffectiveConfig
 from ..retrieve.coinglass import run_retrieve
 from ..feature.engine import update_features_last
 from ..backtest.engine import run_backtest
-from pathlib import Path
-from typing import Optional
-import json
+# (duplicates removed)
 
 
 def _utc_now_ms() -> int:

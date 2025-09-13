@@ -53,6 +53,13 @@ alerts:
 conventions:
   orderbook:
     max_snapshot_age_s: 60
+  symbol_to_coin:
+    BTCUSDT: BTC
+    ETHUSDT: ETH
+  units:
+    liquidation_notional: USDT
+    open_interest: contracts
+    taker_volume: base
 
 notifications:
   telegram:
@@ -63,13 +70,6 @@ notifications:
     include_json: true
     cooldown_min: 60
     limit: 10
-  symbol_to_coin:
-    BTCUSDT: BTC
-    ETHUSDT: ETH
-  units:
-    liquidation_notional: USDT
-    open_interest: contracts
-    taker_volume: base
 features:
   funding:
     settlement_hours_utc:
