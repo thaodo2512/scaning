@@ -8,7 +8,7 @@ services:
       - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --once --build-reports --report-engine plotly"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --ensure-data --online --once --build-reports --report-engine plotly"]
 
   realtime:
     build: .
@@ -21,7 +21,7 @@ services:
       - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports --report-engine plotly --send-telegram --telegram-kinds storm,pre_alert"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --ensure-data --online --watch --poll-offset-s 10 --jitter-s 2 --build-reports --report-engine plotly --send-telegram --telegram-kinds storm,pre_alert"]
     restart: unless-stopped
 
   api:
@@ -31,7 +31,7 @@ services:
       - PYTHONPATH=/app/src
     volumes:
       - ./:/app
-    command: ["python", "-m", "cryptostorm", "api", "configs/realtime.yaml", "--data", "data", "--features", "features", "--reports", "reports", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["python", "-m", "cryptostorm", "api", "configs/top.yaml", "--data", "data", "--features", "features", "--reports", "reports", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -43,6 +43,6 @@ services:
       - PYTHONPATH=/app/src
     volumes:
       - ./:/app
-    command: ["python", "-m", "cryptostorm", "monitor", "configs/realtime.yaml", "--data", "data", "--features", "features", "--symbols", "20", "--view", "alerts"]
+    command: ["python", "-m", "cryptostorm", "monitor", "configs/top.yaml", "--data", "data", "--features", "features", "--symbols", "20", "--view", "alerts"]
     stdin_open: true
     tty: true
