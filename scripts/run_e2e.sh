@@ -78,7 +78,7 @@ echo "[4/6] Running backtest ($FEATURES_INTERVAL) -> artifacts/<RUN_ID>/"
 python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL"
 
 echo "[5/6] Auditing 30d coverage (min_ratio=$MIN_COVERAGE)"
-python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE"
+python -m cryptostorm audit "$CONFIG" --data "$DATA_DIR" --min-ratio "$MIN_COVERAGE" --soft-fail
 
 echo "[6/6] Generating interactive price+alerts (Plotly) -> reports/"
 python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out reports

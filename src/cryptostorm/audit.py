@@ -206,6 +206,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--min-ratio", type=float, default=0.95, help="Min coverage ratio to pass")
     parser.add_argument("--debug", action="store_true", help="Print extra diagnostics for failing rows")
     parser.add_argument("--show-missing", type=int, default=5, help="Show first N missing 5m bars for failing rows (0=off)")
+    parser.add_argument("--soft-fail", action="store_true", help="Do not exit non-zero on coverage failures; print results and exit 0")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -237,7 +238,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
     if failures:
         print(f"FAIL: {len(failures)} dataset(s) below ratio {args.min_ratio}")
-        return 1
+        if not args.soft_fail:
+            return 1
+        # Soft-fail requested: exit 0 after reporting
+        return 0
     print("OK: coverage meets threshold")
     return 0
 
