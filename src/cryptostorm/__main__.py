@@ -64,6 +64,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_bt.add_argument("--features", type=str, default="features")
     p_bt.add_argument("--artifacts-root", type=str)
     p_bt.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
+    p_bt.add_argument("--workers", type=int, default=1)
 
     p_rep = sub.add_parser("report", help="Generate per-symbol HTML reports")
     p_rep.add_argument("config", type=str)
@@ -228,6 +229,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         argv = [args.config, "--features", args.features, "--features-interval", args.features_interval]
         if args.artifacts_root:
             argv += ["--artifacts-root", args.artifacts_root]
+        if int(args.workers) > 1:
+            argv += ["--workers", str(int(args.workers))]
         return backtest_main(argv)
 
     if args.cmd == "report":

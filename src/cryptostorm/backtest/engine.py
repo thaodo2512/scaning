@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import pickle
 
 from ..config import EffectiveConfig, load_config, validate_config
+import logging
 
 
 def _read_csv_features(fp: Path) -> List[Dict[str, Any]]:
@@ -228,7 +229,247 @@ def _train_window_start(block_start: int, window_days: int) -> int:
     return block_start - window_days * 24 * 60 * 60 * 1000
 
 
-def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path, features_interval: str = "auto") -> Dict[str, Any]:
+def _clone_eff_for_symbols(eff: EffectiveConfig, symbols: List[str]) -> EffectiveConfig:
+    from dataclasses import replace
+
+    sub_map = {k: v for k, v in eff.symbol_to_coin.items() if k in symbols}
+    return replace(eff, symbols=list(symbols), symbol_to_coin=sub_map)
+
+
+def _backtest_one_symbol(
+    cfg: Mapping[str, Any],
+    eff: EffectiveConfig,
+    *,
+    features_root: Path,
+    out_root: Path,
+    features_interval: str,
+    train_window_days: int,
+    retrain_every_hours: int,
+    threshold_q: float,
+    min_cov: float,
+    clip_low: float,
+    clip_high: float,
+    if_defaults: Mapping[str, Any],
+    per_tier: Mapping[str, Any],
+    random_state: int,
+    pct_move: float,
+    horizons: List[int],
+    symbol: str,
+) -> Optional[Dict[str, Any]]:
+    LOG = logging.getLogger("cryptostorm.backtest")
+    sym = symbol
+    # Select features file by requested interval
+    if features_interval == "15m":
+        feat_fp = features_root / sym / "features_15m.csv"
+    elif features_interval == "5m":
+        feat_fp = features_root / sym / "features_5m.csv"
+    else:  # auto
+        feat_fp = features_root / sym / "features_15m.csv"
+        if not feat_fp.exists():
+            feat_fp = features_root / sym / "features_5m.csv"
+    rows = _read_csv_features(feat_fp)
+    rows.sort(key=lambda r: (r.get("ts") or 0))
+    if not rows:
+        return None
+
+    # Prepare scores array initialized as NaN
+    scores: List[float] = [math.nan] * len(rows)
+    thresholds: List[float] = [math.nan] * len(rows)
+
+    # Walk forward by retrain blocks
+    blocks: Dict[int, List[int]] = {}
+    for idx, r in enumerate(rows):
+        ts = int(r.get("ts") or 0)
+        b = _retrain_block(ts, retrain_every_hours)
+        blocks.setdefault(b, []).append(idx)
+
+    last_artifact: Optional[Dict[str, Any]] = None
+    for b_start, idxs in sorted(blocks.items()):
+        # Training window rows: those with ts in [w_start, b_start)
+        w_start = _train_window_start(b_start, train_window_days)
+        train_rows = [r for r in rows if (r.get("ts") or 0) >= w_start and (r.get("ts") or 0) < b_start]
+        if len(train_rows) < 10:
+            continue
+        features = _select_features(train_rows, min_cov)
+        if not features:
+            continue
+        # Fit scaler + model
+        stats, X_train, _ = _fit_iforest_train_matrix(train_rows, features, clip_low, clip_high)
+        eval_rows = [rows[i] for i in idxs]
+        X_eval = _transform_rows(eval_rows, features, stats)
+
+        # Choose IF params per tier
+        tier = _symbol_tier(cfg, sym)
+        params = {**if_defaults, **(per_tier.get(tier) or {})}
+        train_scores, eval_scores = _iforest_scores(X_train, X_eval, params, random_state)
+        thr = _quantile(train_scores, threshold_q)
+        # Record artifact snapshot (latest wins)
+        last_artifact = {
+            "features": features,
+            "stats": stats,
+            "threshold": float(thr),
+            "params": params,
+            "block_start": int(b_start),
+            "window_start": int(w_start),
+        }
+        for j, i in enumerate(idxs):
+            scores[i] = float(eval_scores[j])
+            thresholds[i] = float(thr)
+
+    # Build alerts using persistence + cooldown
+    alerts_cfg = (cfg.get("alerts") or {})
+    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
+    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
+    tier = _symbol_tier(cfg, sym)
+    confirm_k = int((confirm_map.get(tier) if isinstance(confirm_map, Mapping) else None) or confirm_map.get("default", 2))
+    ge_count = 0
+    cooldown = 0
+    pre_alerts: List[Dict[str, Any]] = []
+    storms: List[Dict[str, Any]] = []
+    for i, r in enumerate(rows):
+        s = scores[i]
+        thr = thresholds[i]
+        if isinstance(s, float) and isinstance(thr, float) and not math.isnan(s) and not math.isnan(thr) and s >= thr:
+            ge_count += 1
+        else:
+            ge_count = 0
+        if ge_count == persist_k:
+            pre_alerts.append({"ts": int(r.get("ts") or 0), "symbol": sym, "score": s, "threshold": thr, "kind": "pre_alert"})
+        if cooldown > 0:
+            cooldown -= 1
+        elif ge_count == confirm_k:
+            storms.append({"ts": int(r.get("ts") or 0), "symbol": sym, "score": s, "threshold": thr, "kind": "storm"})
+            cooldown = cooldown_bars
+
+    # Write per-symbol outputs
+    import csv
+
+    out_alerts = out_root / "alerts"
+    out_scores = out_root / "scores"
+    out_alerts.mkdir(parents=True, exist_ok=True)
+    out_scores.mkdir(parents=True, exist_ok=True)
+
+    sco_fp = out_scores / f"{sym}.csv"
+    with sco_fp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["ts", "symbol", "score", "threshold"])
+        for i, r in enumerate(rows):
+            w.writerow([int(r.get("ts") or 0), sym, scores[i], thresholds[i]])
+
+    def write_alerts(fp: Path, arr: List[Dict[str, Any]]):
+        with fp.open("w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["ts", "symbol", "kind", "score", "threshold"])
+            w.writeheader()
+            for a in arr:
+                w.writerow(a)
+
+    write_alerts(out_alerts / f"{sym}.csv", pre_alerts + storms)
+
+    # Persist online model artifact for this symbol (latest block only)
+    if last_artifact is None and len(rows) >= 10:
+        # Fallback: build an artifact from the available history
+        train_rows = rows[:-1] if len(rows) > 1 else rows
+        features = _select_features(train_rows, min_cov)
+        if features:
+            stats_fallback, X_train_fb, _ = _fit_iforest_train_matrix(train_rows, features, clip_low, clip_high)
+            train_scores_fb, _ = _iforest_scores(X_train_fb, X_train_fb, if_defaults, random_state)
+            thr_fb = _quantile(train_scores_fb, threshold_q)
+            last_artifact = {
+                "features": features,
+                "stats": stats_fallback,
+                "threshold": float(thr_fb),
+                "params": if_defaults,
+                "block_start": int(rows[-1].get("ts") or 0),
+                "window_start": int(rows[0].get("ts") or 0),
+            }
+    if last_artifact is not None:
+        models_dir = out_root / "models"
+        model_obj = None
+        try:
+            params = last_artifact.get("params", {})
+            stats_la = last_artifact.get("stats")
+            features_list = last_artifact.get("features") or []
+            if stats_la and features_list:
+                train_rows_full = [r for r in rows if (r.get("ts") or 0) >= last_artifact["window_start"] and (r.get("ts") or 0) < last_artifact["block_start"]]
+                if len(train_rows_full) >= 10:
+                    stats2, X_train2, _ = _fit_iforest_train_matrix(train_rows_full, features_list, clip_low, clip_high)
+                    from sklearn.ensemble import IsolationForest  # type: ignore
+
+                    eff_params = {k: v for k, v in params.items() if k in {"n_estimators", "max_samples", "max_features", "contamination", "bootstrap", "n_jobs"}}
+                    model_obj = IsolationForest(random_state=random_state, **eff_params)
+                    model_obj.fit(X_train2)
+                    last_artifact["stats"] = stats2
+        except Exception:
+            model_obj = None
+        _save_online_artifact(
+            models_dir,
+            sym,
+            features=last_artifact["features"],
+            stats=last_artifact["stats"],
+            threshold=float(last_artifact["threshold"]),
+            model_obj=model_obj,
+            meta={
+                "block_start": last_artifact["block_start"],
+                "window_start": last_artifact["window_start"],
+                "random_state": random_state,
+            },
+        )
+
+    # Metrics per symbol
+    ts_to_close = {int(r.get("ts") or 0): float(r.get("close")) for r in rows if isinstance(r.get("close"), (int, float)) and not math.isnan(r.get("close"))}
+    step = 5 * 60 * 1000
+    true_positive = 0
+    total_storms = len(storms)
+    lead_times: List[int] = []
+    for a in storms:
+        t0 = a["ts"]
+        p0 = ts_to_close.get(t0)
+        if not isinstance(p0, (int, float)):
+            continue
+        hit = False
+        earliest_lead = None
+        for h in horizons:
+            horizon_ms = int(h) * 60 * 1000
+            end_t = t0 + horizon_ms
+            cur_t = t0 + step
+            while cur_t <= end_t:
+                p = ts_to_close.get(cur_t)
+                if isinstance(p, (int, float)):
+                    move = abs((p - p0) / p0)
+                    if move >= pct_move:
+                        hit = True
+                        if earliest_lead is None:
+                            earliest_lead = int((cur_t - t0) / (60 * 1000))
+                        break
+                cur_t += step
+            if hit:
+                break
+        if hit:
+            true_positive += 1
+            if earliest_lead is not None:
+                lead_times.append(earliest_lead)
+
+    precision = (true_positive / total_storms) if total_storms else None
+    avg_lead = (sum(lead_times) / len(lead_times)) if lead_times else None
+    return {
+        "symbol": sym,
+        "storm_count": total_storms,
+        "true_positive": true_positive,
+        "precision": precision,
+        "avg_lead_min": avg_lead,
+    }
+
+
+def run_backtest(
+    cfg: Mapping[str, Any],
+    eff: EffectiveConfig,
+    *,
+    features_root: Path,
+    out_root: Path,
+    features_interval: str = "auto",
+    workers: int = 1,
+) -> Dict[str, Any]:
     # Extract model and alert params
     model_cfg = (cfg.get("model") or {})
     alerts_cfg = (cfg.get("alerts") or {})
@@ -263,7 +504,70 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
     out_scores.mkdir(parents=True, exist_ok=True)
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    for sym in eff.symbols:
+    symbols = list(eff.symbols)
+    if int(workers) > 1:
+        # Parallel execution per symbol
+        import concurrent.futures as cf
+        import os as _os
+        import time as _time
+        LOG = logging.getLogger("cryptostorm.backtest")
+        max_workers = max(1, int(workers))
+        LOG.info("parallel backtest: symbols=%d workers=%d interval=%s", len(symbols), max_workers, features_interval)
+        # Ensure directories exist before workers write
+        (out_root / "alerts").mkdir(parents=True, exist_ok=True)
+        (out_root / "scores").mkdir(parents=True, exist_ok=True)
+        (out_root / "models").mkdir(parents=True, exist_ok=True)
+        submit_ts: dict[str, float] = {}
+        done = 0
+        total = len(symbols)
+        with cf.ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futs = {}
+            for s in symbols:
+                submit_ts[s] = _time.monotonic()
+                fut = ex.submit(
+                    _backtest_one_symbol,
+                    cfg,
+                    eff,
+                    features_root=features_root,
+                    out_root=out_root,
+                    features_interval=features_interval,
+                    train_window_days=train_window_days,
+                    retrain_every_hours=retrain_every_hours,
+                    threshold_q=threshold_q,
+                    min_cov=min_cov,
+                    clip_low=clip_low,
+                    clip_high=clip_high,
+                    if_defaults=if_defaults,
+                    per_tier=per_tier,
+                    random_state=random_state,
+                    pct_move=pct_move,
+                    horizons=horizons,
+                    symbol=s,
+                )
+                futs[fut] = s
+            for fut in cf.as_completed(futs):
+                s = futs[fut]
+                done += 1
+                try:
+                    res = fut.result()
+                    if isinstance(res, dict):
+                        metrics["symbols"][res["symbol"]] = {k: res[k] for k in ("storm_count", "true_positive", "precision", "avg_lead_min")}
+                    LOG.info("[%d/%d] backtest %s done", done, total, s)
+                except Exception as e:  # noqa: BLE001
+                    dur = _time.monotonic() - submit_ts.get(s, _time.monotonic())
+                    LOG.warning("[%d/%d] backtest %s failed after %.2fs: %s", done, total, s, dur, e)
+        # Rollup metrics and write file
+        totals = [metrics["symbols"][s]["storm_count"] for s in metrics["symbols"]]
+        tps = [metrics["symbols"][s]["true_positive"] for s in metrics["symbols"]]
+        total_storms = sum(totals) if totals else 0
+        total_tp = sum(tps) if tps else 0
+        precision = (total_tp / total_storms) if total_storms else None
+        metrics["summary"] = {"storm_count": total_storms, "true_positive": total_tp, "precision": precision}
+        (out_root / "metrics").mkdir(parents=True, exist_ok=True)
+        (out_root / "metrics" / "metrics.json").write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        return metrics
+
+    for sym in symbols:
         # Select features file by requested interval
         if features_interval == "15m":
             feat_fp = features_root / sym / "features_15m.csv"
@@ -476,7 +780,156 @@ def run_backtest(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
     return metrics
 
 
-def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path, features_interval: str = "auto") -> Dict[str, Any]:
+def _score_online_one_symbol(
+    cfg: Mapping[str, Any],
+    eff: EffectiveConfig,
+    *,
+    features_root: Path,
+    out_root: Path,
+    features_interval: str,
+    symbol: str,
+) -> Optional[Tuple[str, int, float]]:
+    import csv as _csv
+    sym = symbol
+    model_dir = out_root / "models"
+    alerts_dir = out_root / "alerts"
+    scores_dir = out_root / "scores"
+    alerts_dir.mkdir(parents=True, exist_ok=True)
+    scores_dir.mkdir(parents=True, exist_ok=True)
+
+    alerts_cfg = (cfg.get("alerts") or {})
+    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
+    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
+
+    art = _load_online_artifact(model_dir, sym)
+    if not art:
+        return None
+    # Load latest row from features
+    if features_interval == "15m":
+        feat_fp = features_root / sym / "features_15m.csv"
+    elif features_interval == "5m":
+        feat_fp = features_root / sym / "features_5m.csv"
+    else:
+        feat_fp = features_root / sym / "features_15m.csv"
+        if not feat_fp.exists():
+            feat_fp = features_root / sym / "features_5m.csv"
+    rows = _read_csv_features(feat_fp)
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (r.get("ts") or 0))
+    latest = rows[-1]
+    ts = int(latest.get("ts") or 0)
+    sco_fp = scores_dir / f"{sym}.csv"
+    # Skip if this ts already scored
+    if sco_fp.exists():
+        try:
+            with sco_fp.open("r", encoding="utf-8") as f:
+                rdr = _csv.DictReader(f)
+                last_ts = None
+                for r in rdr:
+                    try:
+                        last_ts = int(r.get("ts") or 0)
+                    except Exception:
+                        continue
+                if last_ts == ts:
+                    return (sym, 0, 0.0)
+        except Exception:
+            pass
+
+    # Transform latest row using persisted stats
+    features_list: List[str] = list(art.get("features") or [])
+    stats_list: List[RobustStats] = []
+    for s in (art.get("stats") or []):
+        try:
+            stats_list.append(RobustStats(float(s["median"]), float(s["q1"]), float(s["q3"]), float(s["low"]), float(s["high"])) )
+        except Exception:
+            pass
+    x_row = []
+    for i, k in enumerate(features_list):
+        v = float(latest.get(k)) if isinstance(latest.get(k), (int, float)) else math.nan
+        st = stats_list[i] if i < len(stats_list) else RobustStats(0.0, -1.0, 1.0, -3.0, 3.0)
+        x_row.append(_scale_value(v, st))
+
+    # Score using model if available, else fallback aggregator
+    model = art.get("_model")
+    try:
+        if model is not None and hasattr(model, "decision_function"):
+            score_val = -float(model.decision_function([x_row])[0])
+        else:
+            score_val = float(sum(abs(v) for v in x_row))
+    except Exception:
+        score_val = float(sum(abs(v) for v in x_row))
+    threshold = float(art.get("threshold", math.nan))
+
+    # Append to scores CSV
+    write_header = not sco_fp.exists()
+    with sco_fp.open("a", newline="", encoding="utf-8") as f:
+        w = _csv.writer(f)
+        if write_header:
+            w.writerow(["ts", "symbol", "score", "threshold"])
+        w.writerow([ts, sym, score_val, threshold])
+
+    # Recompute alerts state efficiently from scores
+    try:
+        with sco_fp.open("r", encoding="utf-8") as f:
+            rdr = list(_csv.DictReader(f))
+    except Exception:
+        rdr = []
+    tier = _symbol_tier(cfg, sym)
+    confirm_k = int((confirm_map.get(tier) if isinstance(confirm_map, Mapping) else None) or confirm_map.get("default", 2))
+    ge_count = 0
+    cooldown = 0
+    pre_alert = None
+    storm_alert = None
+    for r in rdr:
+        try:
+            t = int(r.get("ts") or 0)
+            s = float(r.get("score") or math.nan)
+            thr = float(r.get("threshold") or math.nan)
+        except Exception:
+            continue
+        if isinstance(s, float) and isinstance(thr, float) and not math.isnan(s) and not math.isnan(thr) and s >= thr:
+            ge_count += 1
+        else:
+            ge_count = 0
+        if ge_count == persist_k:
+            pre_alert = {"ts": t, "symbol": sym, "kind": "pre_alert", "score": s, "threshold": thr}
+        if cooldown > 0:
+            cooldown -= 1
+        elif ge_count == confirm_k:
+            storm_alert = {"ts": t, "symbol": sym, "kind": "storm", "score": s, "threshold": thr}
+            cooldown = cooldown_bars
+
+    al_fp = out_root / "alerts" / f"{sym}.csv"
+    new_alerts = 0
+    if pre_alert or storm_alert:
+        try:
+            write_header = not al_fp.exists()
+            existing: set[Tuple[int, str]] = set()
+            if al_fp.exists():
+                with al_fp.open("r", encoding="utf-8") as f:
+                    rdr2 = _csv.DictReader(f)
+                    for r in rdr2:
+                        try:
+                            existing.add((int(r.get("ts") or 0), str(r.get("kind") or "")))
+                        except Exception:
+                            continue
+            with al_fp.open("a", newline="", encoding="utf-8") as f:
+                w = _csv.DictWriter(f, fieldnames=["ts", "symbol", "kind", "score", "threshold"])
+                if write_header:
+                    w.writeheader()
+                for a in [pre_alert, storm_alert]:
+                    if a and (a["ts"], a["kind"]) not in existing:
+                        w.writerow(a)
+                        new_alerts += 1
+        except Exception:
+            pass
+
+    return (sym, 1, float(new_alerts))
+
+
+def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root: Path, out_root: Path, features_interval: str = "auto", workers: int = 1) -> Dict[str, Any]:
     """Score only the latest row per symbol using persisted online artifacts.
 
     Appends to scores and updates alerts incrementally. Skips symbols without artifacts.
@@ -495,7 +948,39 @@ def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
 
     summary: Dict[str, Any] = {"symbols": {}, "appended_scores": 0, "new_alerts": 0}
 
-    for sym in eff.symbols:
+    symbols = list(eff.symbols)
+    if int(workers) > 1:
+        import concurrent.futures as cf
+        import time as _time
+        import os as _os
+        LOG = logging.getLogger("cryptostorm.backtest")
+        max_workers = max(1, int(workers))
+        LOG.info("parallel score_online: symbols=%d workers=%d interval=%s", len(symbols), max_workers, features_interval)
+        done = 0
+        total = len(symbols)
+        submit_ts: dict[str, float] = {}
+        with cf.ProcessPoolExecutor(max_workers=max_workers) as ex:
+            futs = {}
+            for s in symbols:
+                submit_ts[s] = _time.monotonic()
+                futs[ex.submit(_score_online_one_symbol, cfg, eff, features_root=features_root, out_root=out_root, features_interval=features_interval, symbol=s)] = s
+            for fut in cf.as_completed(futs):
+                s = futs[fut]
+                done += 1
+                try:
+                    res = fut.result()
+                    if res is not None:
+                        sym, appended, new_alerts = res
+                        summary["appended_scores"] += int(appended)
+                        summary["new_alerts"] += int(new_alerts)
+                        summary["symbols"][sym] = {"appended": int(appended), "new_alerts": int(new_alerts)}
+                    LOG.info("[%d/%d] score_online %s done", done, total, s)
+                except Exception as e:  # noqa: BLE001
+                    dur = _time.monotonic() - submit_ts.get(s, _time.monotonic())
+                    LOG.warning("[%d/%d] score_online %s failed after %.2fs: %s", done, total, s, dur, e)
+        return summary
+
+    for sym in symbols:
         art = _load_online_artifact(model_dir, sym)
         if not art:
             continue
@@ -645,6 +1130,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--artifacts-root", type=str, help="Override artifacts root; defaults to run.artifacts_root/run_id")
     parser.add_argument("--online", action="store_true", help="Score only latest row using persisted artifacts (no retrain)")
     parser.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto", help="Select which features cadence to use (default: auto)")
+    parser.add_argument("--workers", type=int, default=1, help="Worker processes for per-symbol parallelism (default: 1)")
     args = parser.parse_args(argv)
 
     cfg = load_config(args.config)
@@ -658,10 +1144,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     artifacts_root.mkdir(parents=True, exist_ok=True)
 
     if args.online:
-        summary = score_online(cfg, eff, features_root=Path(args.features), out_root=artifacts_root, features_interval=str(args.features_interval))
+        summary = score_online(
+            cfg,
+            eff,
+            features_root=Path(args.features),
+            out_root=artifacts_root,
+            features_interval=str(args.features_interval),
+            workers=int(args.workers),
+        )
         print(json.dumps({"online_summary": summary}))
     else:
-        run_backtest(cfg, eff, features_root=Path(args.features), out_root=artifacts_root, features_interval=str(args.features_interval))
+        run_backtest(
+            cfg,
+            eff,
+            features_root=Path(args.features),
+            out_root=artifacts_root,
+            features_interval=str(args.features_interval),
+            workers=int(args.workers),
+        )
         print(f"Backtest artifacts written to {artifacts_root}")
     return 0
 

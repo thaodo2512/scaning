@@ -76,8 +76,8 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 
 - `python -m cryptostorm realtime <config> [--data data --features features --artifacts <dir> --once --online-scoring --poll-offset-s 10 --jitter-s 2 --send-telegram --telegram-kinds storm,pre_alert --bar-interval 5m|15m]`
 - `python -m cryptostorm retrieve <config> --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2 [--once]`
-- `python -m cryptostorm feature <config> --data data --out features [--interval 5m|15m] [--update-last]`
-- `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online] [--features-interval 5m|15m|auto]`
+- `python -m cryptostorm feature <config> --data data --out features [--interval 5m|15m] [--update-last] [--workers N]`
+- `python -m cryptostorm backtest <config> --features features [--artifacts-root <dir>] [--online] [--features-interval 5m|15m|auto] [--workers N]`
 - `python -m cryptostorm api <config> [--data data --features features --artifacts <dir> --reports reports --host 0.0.0.0 --port 8000 --token TOKEN]`
 - `python -m cryptostorm storage export-parquet <config> --data data --features features --out parquet`
 - `python -m cryptostorm storage emit-ddl <config> --kind clickhouse|timescale --out ./ddl`
@@ -85,7 +85,7 @@ This repository now includes a complete Phase 0–5 realtime implementation with
 - Reports:
   - Lightweight Charts: `python -m cryptostorm report <config> --data data --features features --out reports`
   - Plotly full: `python -m cryptostorm report-plotly <config> --data data --out reports`
-  - Plotly price+alerts: `python -m cryptostorm report-price <config> --data data --out reports`
+- Plotly price+alerts: `python -m cryptostorm report-price <config> --data data --out reports`
 
 ## Reporting Engines
 - Default lightweight‑charts report preserved.
