@@ -109,8 +109,17 @@ python -m cryptostorm report-price "$CONFIG" --data "$DATA_DIR" --out reports
 
 # Optional: send Telegram alerts (storm only) if credentials are present and SEND_TELEGRAM=1
 if [[ "${SEND_TELEGRAM:-0}" == "1" && -n "${TELEGRAM_BOT_TOKEN:-}" && -n "${TELEGRAM_CHAT_ID:-}" ]]; then
-  echo "[opt] Sending Telegram alerts (storm)"
-  python -m cryptostorm alert-telegram "$CONFIG" --kinds storm --only-new || true
+  echo "[opt] Sending Telegram alerts (storm) with aligned since-ts"
+  # Compute aligned bar ts (ms) for the configured features interval; use one-bar lookback handled by sender default
+  if [[ "$FEATURES_INTERVAL" == "5m" ]]; then STEP_MIN=5; else STEP_MIN=15; fi
+  BAR_TS=$(python - <<PY
+import time
+step=${STEP_MIN}*60*1000
+now=int(time.time()*1000)
+print(now - now%step)
+PY
+)
+  python -m cryptostorm alert-telegram "$CONFIG" --kinds storm --only-new --since-ts "$BAR_TS" || true
 fi
 
 echo "E2E pipeline completed successfully."
