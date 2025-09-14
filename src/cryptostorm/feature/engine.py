@@ -596,6 +596,19 @@ def _orderbook_spread_bps(data_dir: Path, bar_ts: int, max_age_s: int, snaps: Op
         return best_spread_bps
     bids = payload.get("bids") if isinstance(payload, Mapping) else None
     asks = payload.get("asks") if isinstance(payload, Mapping) else None
+    # Fallback: estimate spread from aggregated totals if no level arrays are present
+    if isinstance(payload, Mapping) and (bids is None and asks is None):
+        bu = _as_float(payload.get("bids_usd"))
+        bq = _as_float(payload.get("bids_quantity"))
+        au = _as_float(payload.get("asks_usd"))
+        aq = _as_float(payload.get("asks_quantity"))
+        if bu is not None and bq is not None and au is not None and aq is not None and bq > 0 and aq > 0:
+            avg_bid = float(bu) / float(bq)
+            avg_ask = float(au) / float(aq)
+            if avg_bid > 0 and avg_ask > 0:
+                mid = 0.5 * (avg_bid + avg_ask)
+                if mid > 0:
+                    return (avg_ask - avg_bid) / mid * 1e4
     def _first_price(side):
         if isinstance(side, list) and side:
             top = side[0]
