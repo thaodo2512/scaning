@@ -107,6 +107,36 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str
             pre_points.append(pt)
 
     plotly_js = _inline_plotly()
+    # Build evaluation pills HTML outside of f-string expressions to avoid parser issues
+    eval_html = ""
+    if isinstance(eval_info, dict):
+        pills: List[str] = []
+        if eval_info.get("pct_move") is not None:
+            pills.append(f"<span class=\"pill\">pct_move={eval_info.get('pct_move')}</span>")
+        hz = eval_info.get("horizons")
+        if isinstance(hz, list) and hz:
+            try:
+                hz_str = ",".join(str(x) for x in hz) + "m"
+            except Exception:
+                hz_str = ""
+            if hz_str:
+                pills.append(f"<span class=\"pill\">horizons={hz_str}</span>")
+        for key in ("storm_count", "true_positive"):
+            if eval_info.get(key) is not None:
+                pills.append(f"<span class=\"pill\">{key.replace('_',' ')}={eval_info.get(key)}</span>")
+        if eval_info.get("precision") is not None:
+            try:
+                pills.append(f"<span class=\"pill\">precision={float(eval_info.get('precision')):.3f}</span>")
+            except Exception:
+                pills.append(f"<span class=\"pill\">precision={eval_info.get('precision')}</span>")
+        if eval_info.get("avg_lead_min") is not None:
+            try:
+                pills.append(f"<span class=\"pill\">avg_lead_min={float(eval_info.get('avg_lead_min')):.1f}</span>")
+            except Exception:
+                pills.append(f"<span class=\"pill\">avg_lead_min={eval_info.get('avg_lead_min')}</span>")
+        if pills:
+            eval_html = "<div class=\"metrics\">" + "".join(pills) + "</div>"
+
     html = f"""
 <!doctype html>
 <html>
@@ -126,14 +156,7 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str
 <body>
   <div class=\"wrap\"> 
     <div class=\"title\">{symbol} — Price + Alerts</div>
-    {("<div class=\\"metrics\\">" +
-       ("<span class=\\"pill\\">pct_move=" + str(eval_info.get('pct_move')) + "</span>" if eval_info and eval_info.get('pct_move') is not None else "") +
-       ("<span class=\\"pill\\">horizons=" + ",".join(str(x) for x in (eval_info.get('horizons') or [])) + "m</span>" if eval_info and eval_info.get('horizons') else "") +
-       ("<span class=\\"pill\\">storms=" + str(eval_info.get('storm_count')) + "</span>" if eval_info and eval_info.get('storm_count') is not None else "") +
-       ("<span class=\\"pill\\">hits=" + str(eval_info.get('true_positive')) + "</span>" if eval_info and eval_info.get('true_positive') is not None else "") +
-       ("<span class=\\"pill\\">precision=" + (f\"{eval_info.get('precision'):.3f}\" if isinstance(eval_info.get('precision'), (int,float)) else str(eval_info.get('precision'))) + "</span>" if eval_info and eval_info.get('precision') is not None else "") +
-       ("<span class=\\"pill\\">avg_lead_min=" + (f\"{eval_info.get('avg_lead_min'):.1f}\" if isinstance(eval_info.get('avg_lead_min'), (int,float)) else str(eval_info.get('avg_lead_min'))) + "</span>" if eval_info and eval_info.get('avg_lead_min') is not None else "") +
-       "</div>") if eval_info else ""}
+    {eval_html}
     <div id=\"chart\"></div>
   </div>
   <script>
