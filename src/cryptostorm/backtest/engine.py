@@ -318,8 +318,9 @@ def _backtest_one_symbol(
 
     # Build alerts using persistence + cooldown
     alerts_cfg = (cfg.get("alerts") or {})
-    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
-    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    # Back-compat: prefer *_bars keys; fall back to legacy *_5m
+    persist_k = int(alerts_cfg.get("persist_k_bars", alerts_cfg.get("persist_k_5m", 2)))
+    confirm_map = alerts_cfg.get("storm_confirm_k_bars", alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2}))
     cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
     tier = _symbol_tier(cfg, sym)
     confirm_k = int((confirm_map.get(tier) if isinstance(confirm_map, Mapping) else None) or confirm_map.get("default", 2))
@@ -487,8 +488,8 @@ def run_backtest(
     per_tier = model_cfg.get("per_tier_overrides", {})
     random_state = int(model_cfg.get("random_state", 42))
 
-    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
-    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    persist_k = int(alerts_cfg.get("persist_k_bars", alerts_cfg.get("persist_k_5m", 2)))
+    confirm_map = alerts_cfg.get("storm_confirm_k_bars", alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2}))
     cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
 
     pct_move = float(labels_cfg.get("pct_move", 0.05))
@@ -798,8 +799,8 @@ def _score_online_one_symbol(
     scores_dir.mkdir(parents=True, exist_ok=True)
 
     alerts_cfg = (cfg.get("alerts") or {})
-    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
-    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    persist_k = int(alerts_cfg.get("persist_k_bars", alerts_cfg.get("persist_k_5m", 2)))
+    confirm_map = alerts_cfg.get("storm_confirm_k_bars", alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2}))
     cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
 
     art = _load_online_artifact(model_dir, sym)
@@ -942,8 +943,8 @@ def score_online(cfg: Mapping[str, Any], eff: EffectiveConfig, *, features_root:
 
     model_cfg = (cfg.get("model") or {})
     alerts_cfg = (cfg.get("alerts") or {})
-    persist_k = int(alerts_cfg.get("persist_k_5m", 2))
-    confirm_map = alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2})
+    persist_k = int(alerts_cfg.get("persist_k_bars", alerts_cfg.get("persist_k_5m", 2)))
+    confirm_map = alerts_cfg.get("storm_confirm_k_bars", alerts_cfg.get("storm_confirm_k_5m", {"A": 1, "default": 2}))
     cooldown_bars = int(alerts_cfg.get("cooldown_bars", 12))
 
     summary: Dict[str, Any] = {"symbols": {}, "appended_scores": 0, "new_alerts": 0}

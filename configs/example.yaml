@@ -75,8 +75,8 @@ model:
     C: { n_estimators: 500, max_samples: 1024, max_features: 0.60, contamination: "auto" }
 
 alerts:
-  persist_k_5m: 2
-  storm_confirm_k_5m: { A: 1, default: 2 }
+  persist_k_bars: 2
+  storm_confirm_k_bars: { A: 1, default: 2 }
   cooldown_bars: 12
 
 labels:

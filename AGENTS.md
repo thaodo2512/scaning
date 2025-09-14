@@ -157,5 +157,5 @@ Updated behaviors (2025‑09‑13):
   - Optional AI: `--ai --openai-model` can reorder the top pool; strict subset with fallback.
 
 - Troubleshooting
-  - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_5m: 1`, `storm_confirm_k_5m.default: 1` for a demo; re‑seed models, then run realtime.
+  - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_bars: 1`, `storm_confirm_k_bars.default: 1` for a demo; re‑seed models, then run realtime.
   - Telegram sends nothing: ensure realtime ran with `--send-telegram`; check `artifacts/<RUN_ID>/alerts/*.csv` has new rows; remove `artifacts/<RUN_ID>/alerts/telegram_sent.json` to resend for testing.

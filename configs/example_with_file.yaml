@@ -46,8 +46,8 @@ acquisition:
   mode: coinglass_only
 alerts:
   cooldown_bars: 12
-  persist_k_5m: 2
-  storm_confirm_k_5m:
+  persist_k_bars: 2
+  storm_confirm_k_bars:
     A: 1
     default: 2
 conventions:
