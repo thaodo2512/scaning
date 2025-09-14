@@ -272,7 +272,13 @@ def main(argv: Optional[list[str]] = None) -> int:
             from ..notify.telegram import main as telegram_main
 
             try:
-                telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
+                telegram_main([
+                    cfg.get("_path", ""),
+                    "--artifacts", str(artifacts_root),
+                    "--kinds", args.telegram_kinds,
+                    "--only-new",
+                    "--since-ts", str(int(bar_ts)),
+                ])  # type: ignore[arg-type]
             except Exception:
                 pass
         # Optional reports
@@ -384,7 +390,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                 from ..notify.telegram import main as telegram_main
 
                 try:
-                    telegram_main([cfg.get("_path", ""), "--artifacts", str(artifacts_root), "--kinds", args.telegram_kinds, "--only-new"])  # type: ignore[arg-type]
+                    telegram_main([
+                        cfg.get("_path", ""),
+                        "--artifacts", str(artifacts_root),
+                        "--kinds", args.telegram_kinds,
+                        "--only-new",
+                        "--since-ts", str(int(bar_ts)),
+                    ])  # type: ignore[arg-type]
                 except Exception:
                     pass
             # Optional reports
