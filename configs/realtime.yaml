@@ -4,7 +4,7 @@ run:
 universe:
   symbols:
   - MUSDT
-  - TAUSDT
+  - BTCUSDT
   tiering:
     A:
     - BTCUSDT
@@ -52,7 +52,9 @@ acquisition:
       onchain: aggregated
       etf: aggregated
   enable:
-    spot_ohlcv_5m: true
+    # Enable 15m spot to compute basis features
+    spot_ohlcv_15m: true
+    spot_ohlcv_5m: false
     funding_pred_5m: false
     taker_spot_5m: false
     orderbook_spot_5m: false

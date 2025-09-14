@@ -25,7 +25,7 @@ acquisition:
     orderbook_time_enum: LAST_OF_5M
     intervals:
       futures_ohlcv:  "5m"   # raw 5m; align to 15m in features
-      spot_ohlcv:     "5m"
+      spot_ohlcv:     "15m"
       funding_8h:     "8h"
       oi_ohlc:        "5m"   # aggregated coin 5m raw; align to 15m close
       taker_volume:   "5m"   # taker_futures_5m raw; align to 15m close
@@ -41,7 +41,9 @@ acquisition:
       liquidation:   aggregated
       orderbook:     exchange
   enable:
-    spot_ohlcv_5m: true
+    # Enable 15m spot to compute basis features
+    spot_ohlcv_15m: true
+    spot_ohlcv_5m: false
     funding_pred_5m: false
     taker_spot_5m:  false
     orderbook_spot_5m: false

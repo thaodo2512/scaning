@@ -41,7 +41,9 @@ acquisition:
     funding_pred_5m: false
     onchain_balances_daily: false
     orderbook_spot_5m: false
-    spot_ohlcv_5m: true
+    # Enable 15m spot to compute basis features
+    spot_ohlcv_15m: true
+    spot_ohlcv_5m: false
     taker_spot_5m: false
   mode: coinglass_only
 alerts:

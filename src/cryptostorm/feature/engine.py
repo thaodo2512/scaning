@@ -199,15 +199,31 @@ def _taker_series(data_dir: Path, dataset: str) -> Dict[int, Tuple[float, float]
         pl = rec.get("payload", {})
         if not isinstance(ts, (int, float)) or not isinstance(pl, Mapping):
             continue
-        # try common key variants
+        # try common key variants (camelCase and snake_case; with optional *_usd suffix)
         buy = None
         sell = None
-        for k in ("takerBuyVol", "buyVol", "buy", "takerBuyVolume"):
+        for k in (
+            "takerBuyVol",
+            "buyVol",
+            "buy",
+            "takerBuyVolume",
+            "taker_buy_volume",
+            "taker_buy_volume_usd",
+            "takerBuyVolumeUsd",
+        ):
             vb = _as_float(pl.get(k))
             if vb is not None:
                 buy = float(vb)
                 break
-        for k in ("takerSellVol", "sellVol", "sell", "takerSellVolume"):
+        for k in (
+            "takerSellVol",
+            "sellVol",
+            "sell",
+            "takerSellVolume",
+            "taker_sell_volume",
+            "taker_sell_volume_usd",
+            "takerSellVolumeUsd",
+        ):
             vs = _as_float(pl.get(k))
             if vs is not None:
                 sell = float(vs)
@@ -242,11 +258,18 @@ def _liq_series(data_dir: Path) -> Dict[int, Tuple[float, float]]:
         if not isinstance(ts, (int, float)) or not isinstance(pl, Mapping):
             continue
         notional = None
+        # Support both legacy keys and aggregated long/short notional
         for k in ("notional", "value", "close", "amount", "sumNotional"):
             vn = _as_float(pl.get(k))
             if vn is not None:
                 notional = float(vn)
                 break
+        if notional is None:
+            # Aggregated fields from Coinglass v4
+            long_usd = _as_float(pl.get("aggregated_long_liquidation_usd"))
+            short_usd = _as_float(pl.get("aggregated_short_liquidation_usd"))
+            if long_usd is not None or short_usd is not None:
+                notional = float((long_usd or 0.0) + (short_usd or 0.0))
         count = None
         for k in ("count", "liquidationCount", "sumCount"):
             vc = _as_float(pl.get(k))
@@ -435,13 +458,15 @@ def update_features_last(
         max_age = eff.max_ob_age_s or 60
         snaps_ob = _load_orderbook_snaps(sym_dir)
         spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
-        if math.isnan(spread):
-            row["data_ok"] = False
-        row["spread_bps"] = spread
+        depth = math.nan
         try:
-            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
+            depth = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
         except Exception:
-            pass
+            depth = math.nan
+        row["spread_bps"] = spread
+        row["depth_ratio"] = depth
+        if math.isnan(spread) and math.isnan(depth):
+            row["data_ok"] = False
 
         # Basis
         sc = spot_close.get(ts)
@@ -601,6 +626,12 @@ def _orderbook_depth_ratio(data_dir: Path, bar_ts: int, max_age_s: int, range_bp
         return math.nan
     bids = payload.get("bids") if isinstance(payload, Mapping) else None
     asks = payload.get("asks") if isinstance(payload, Mapping) else None
+    # Fallback: aggregated totals present (no level arrays)
+    if isinstance(payload, Mapping) and (bids is None and asks is None):
+        bu = _as_float(payload.get("bids_usd"))
+        au = _as_float(payload.get("asks_usd"))
+        if bu is not None and au is not None and (bu + au) > 0:
+            return (float(bu) - float(au)) / (float(bu) + float(au))
     # Extract best prices
     def _first_price(side):
         if isinstance(side, list) and side:
@@ -902,15 +933,16 @@ def build_features(
             # order book spread; NaN if stale
             max_age = eff.max_ob_age_s or 60
             spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
-            if math.isnan(spread):
+            depth = math.nan
+            try:
+                depth = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
+            except Exception:
+                depth = math.nan
+            row["spread_bps"] = spread
+            row["depth_ratio"] = depth
+            if math.isnan(spread) and math.isnan(depth):
                 row["data_ok"] = False
                 ob_stale += 1
-            row["spread_bps"] = spread
-            # optional depth ratio within +/- orderbook_range_bp
-            try:
-                row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
-            except Exception:
-                pass
 
             # basis proxy if spot close present
             sc = spot_close.get(ts)
@@ -1399,13 +1431,15 @@ def update_features_last_15m(
         max_age = eff.max_ob_age_s or 60
         snaps_ob = _load_orderbook_snaps(sym_dir)
         spread = _orderbook_spread_bps(sym_dir, ts, max_age, snaps=snaps_ob)
-        if math.isnan(spread):
-            row["data_ok"] = False
-        row["spread_bps"] = spread
+        depth = math.nan
         try:
-            row["depth_ratio"] = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
+            depth = _orderbook_depth_ratio(sym_dir, ts, max_age, eff.orderbook_range_bp, snaps=snaps_ob)
         except Exception:
-            pass
+            depth = math.nan
+        row["spread_bps"] = spread
+        row["depth_ratio"] = depth
+        if math.isnan(spread) and math.isnan(depth):
+            row["data_ok"] = False
 
         # Basis
         sc = spot_close.get(ts)
