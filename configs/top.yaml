@@ -130,13 +130,15 @@ acquisition:
       backoff_initial_s: 1
       backoff_max_s: 64
     slice_days: 10
-    # orderbook_time_enum: LAST_OF_5M
+    orderbook_time_enum: LAST_OF_5M
     intervals:
       futures_ohlcv: 15m
       spot_ohlcv: 15m
       funding_8h: 8h
+      funding_5m: 5m
       oi_ohlc: 15m
       taker_volume: 15m
+      taker_spot_5m: 5m
       liquidation: 15m
       # Disable orderbook sampling for realtime to avoid 5m audit noise
       # orderbook_sample: last_of_5m
@@ -160,7 +162,8 @@ acquisition:
     funding_pred_5m: false
     taker_spot_5m: false
     orderbook_spot_5m: false
-    orderbook_futures_5m: false
+    # Keep futures orderbook enabled (totals fallback supported)
+    orderbook_futures_5m: true
     onchain_balances_daily: false
     etf_flows_daily: false
 features:
