@@ -24,6 +24,19 @@ services:
     command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --online --watch --poll-offset-s 15 --jitter-s 2 --build-reports --report-engine price --send-telegram --telegram-kinds storm,pre_alert"]
     restart: unless-stopped
 
+  trainer:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+      - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+      - CRYPTOSTORM_WORKERS=0
+    volumes:
+      - ./:/app
+    # Looping trainer: backtest (train) then sleep model.retrain_every_hours (default 8h)
+    command: ["bash", "-lc", "scripts/run_trainer.sh -c configs/top.yaml --features-interval 15m --sleep-hours auto"]
+    restart: unless-stopped
+
   api:
     build: .
     image: cryptostorm:latest
