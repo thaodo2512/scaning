@@ -19,6 +19,7 @@ from .api.server import main as api_main
 from .storage.export import main as storage_main
 from .monitor.console import main as monitor_main
 from .universe.binance import main as binance_universe_main
+from .alerts import main as alerts_main
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -157,6 +158,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_uni.add_argument("--print", action="store_true")
     p_uni.add_argument("--ai", action="store_true", help="Use OpenAI to rank candidates (requires OPENAI_API_KEY)")
     p_uni.add_argument("--openai-model", type=str, default="gpt-4o-mini")
+
+    # Alerts utilities
+    p_merge = sub.add_parser("alerts-merge", help="Merge all per-symbol alerts into a single CSV")
+    p_merge.add_argument("config", type=str)
+    p_merge.add_argument("--artifacts", type=str)
 
     args = parser.parse_args(argv)
 
@@ -356,6 +362,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         if args.debug:
             argv += ["--debug"]
         return monitor_main(argv)
+
+    # Alerts utilities (merge per-symbol CSVs into a single all_alerts.csv)
+    if args.cmd == "alerts-merge":  # pragma: no cover
+        argv = ["merge", args.config]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        return alerts_main(argv)
 
     # Hidden utility: select top Binance USDT-perps and update a config's universe.symbols
     if args.cmd == "binance-top":  # pragma: no cover
