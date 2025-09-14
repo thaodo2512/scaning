@@ -188,6 +188,32 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Effective dry_run and since_ts / only_new
     eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
     eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
+
+    # Sensible default: if since_ts not provided, read last realtime bar_ts from metrics and use that (ms)
+    if eff_since_ts is None:
+        try:
+            mfp = alerts_dir.parent / "metrics" / "realtime.jsonl"
+            if mfp.exists():
+                last = None
+                with mfp.open("r", encoding="utf-8") as f:
+                    lines = f.read().splitlines()
+                    if lines:
+                        last = json.loads(lines[-1])
+                if isinstance(last, dict) and last.get("bar_ts"):
+                    step_ms = 15 * 60 * 1000
+                    try:
+                        # Infer step from config if possible
+                        iv = ((cfg.get("acquisition") or {}).get("coinglass") or {}).get("intervals") or {}
+                        fut_iv = str(iv.get("futures_ohlcv") or "15m").lower()
+                        if fut_iv.endswith("m") and fut_iv[:-1].isdigit():
+                            step_ms = int(fut_iv[:-1]) * 60 * 1000
+                    except Exception:
+                        pass
+                    # Default one-bar lookback to cover slow cycles (dedup prevents repeats)
+                    lookback_bars = 1
+                    eff_since_ts = int(last["bar_ts"]) * 1000 - lookback_bars * step_ms
+        except Exception:
+            eff_since_ts = None
     eff_only_new = bool(args.only_new or bool(tg_cfg.get("only_new")))
     eff_include_json = bool(args.include_json or bool(tg_cfg.get("include_json")))
     eff_limit = int(args.limit) if args.limit is not None else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) else None)
