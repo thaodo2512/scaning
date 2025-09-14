@@ -169,8 +169,9 @@ def _iforest_scores(X_train: List[List[float]], X_eval: List[List[float]], param
 
 
 def _save_online_artifact(models_dir: Path, symbol: str, *, features: List[str], stats: List[RobustStats], threshold: float, model_obj: Optional[Any], meta: Dict[str, Any]) -> None:
+    """Atomically persist online artifact (JSON + optional pickle) to avoid races with realtime readers."""
     models_dir.mkdir(parents=True, exist_ok=True)
-    # Save meta JSON
+    # Prepare JSON payload
     stats_arr = [
         {"median": s.median, "q1": s.q1, "q3": s.q3, "low": s.low, "high": s.high}
         for s in stats
@@ -182,14 +183,33 @@ def _save_online_artifact(models_dir: Path, symbol: str, *, features: List[str],
         "threshold": threshold,
         **meta,
     }
-    (models_dir / f"{symbol}.json").write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
-    # Save model pickle if available
+    meta_fp = models_dir / f"{symbol}.json"
+    pkl_fp = models_dir / f"{symbol}.pkl"
+
+    # 1) Write model pickle first (temp + replace) so JSON never points to a non-existent pkl for long
     if model_obj is not None:
         try:
-            with (models_dir / f"{symbol}.pkl").open("wb") as fh:
+            tmp_pkl = pkl_fp.with_suffix(pkl_fp.suffix + ".tmp")
+            with tmp_pkl.open("wb") as fh:
                 pickle.dump(model_obj, fh)
+                try:
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                except Exception:
+                    pass
+            tmp_pkl.replace(pkl_fp)
         except Exception:
+            # best-effort; if pkl fails, continue with JSON only
             pass
+
+    # 2) Write JSON atomically (temp + replace)
+    try:
+        tmp_js = meta_fp.with_suffix(meta_fp.suffix + ".tmp")
+        tmp_js.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        tmp_js.replace(meta_fp)
+    except Exception:
+        # If JSON write fails, leave previous artifact in place
+        pass
 
 
 def _load_online_artifact(models_dir: Path, symbol: str) -> Optional[Dict[str, Any]]:
