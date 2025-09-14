@@ -88,7 +88,7 @@ def _inline_plotly() -> str:
     return "<script src=\"https://cdn.plot.ly/plotly-2.32.0.min.js\"></script>"
 
 
-def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str, Any]]) -> str:
+def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str, Any]], *, eval_info: Optional[Dict[str, Any]] = None) -> str:
     # Map alerts to price bars (use close at alert time). If not found, drop it.
     t_to_close = {p["time"]: p["value"] for p in price if isinstance(p.get("time"), int)}
     pre_points: List[Dict[str, Any]] = []
@@ -118,12 +118,22 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str
     .wrap {{ padding: 8px; }}
     .title {{ font-size: 14px; color: #bbb; margin-bottom: 6px; }}
     #chart {{ width: 100%; height: 80vh; }}
+    .metrics {{ margin: 6px 0 10px; font-size: 12px; color: #ccc; }}
+    .metrics .pill {{ display: inline-block; padding: 2px 6px; margin-right: 6px; border: 1px solid #2a2a2a; border-radius: 10px; background:#151515; }}
   </style>
   {plotly_js}
 </head>
 <body>
   <div class=\"wrap\"> 
     <div class=\"title\">{symbol} — Price + Alerts</div>
+    {("<div class=\\"metrics\\">" +
+       ("<span class=\\"pill\\">pct_move=" + str(eval_info.get('pct_move')) + "</span>" if eval_info and eval_info.get('pct_move') is not None else "") +
+       ("<span class=\\"pill\\">horizons=" + ",".join(str(x) for x in (eval_info.get('horizons') or [])) + "m</span>" if eval_info and eval_info.get('horizons') else "") +
+       ("<span class=\\"pill\\">storms=" + str(eval_info.get('storm_count')) + "</span>" if eval_info and eval_info.get('storm_count') is not None else "") +
+       ("<span class=\\"pill\\">hits=" + str(eval_info.get('true_positive')) + "</span>" if eval_info and eval_info.get('true_positive') is not None else "") +
+       ("<span class=\\"pill\\">precision=" + (f\"{eval_info.get('precision'):.3f}\" if isinstance(eval_info.get('precision'), (int,float)) else str(eval_info.get('precision'))) + "</span>" if eval_info and eval_info.get('precision') is not None else "") +
+       ("<span class=\\"pill\\">avg_lead_min=" + (f\"{eval_info.get('avg_lead_min'):.1f}\" if isinstance(eval_info.get('avg_lead_min'), (int,float)) else str(eval_info.get('avg_lead_min'))) + "</span>" if eval_info and eval_info.get('avg_lead_min') is not None else "") +
+       "</div>") if eval_info else ""}
     <div id=\"chart\"></div>
   </div>
   <script>
@@ -163,12 +173,38 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str
 
 def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path, artifacts_root: Path, out_root: Path) -> None:
     out_root.mkdir(parents=True, exist_ok=True)
+    # Load per-run evaluation metrics if present
+    eval_metrics: Dict[str, Any] = {}
+    try:
+        mfp = artifacts_root / "metrics" / "metrics.json"
+        if mfp.exists():
+            eval_metrics = json.loads(mfp.read_text(encoding="utf-8") or "{}")
+    except Exception:
+        eval_metrics = {}
+    labels_cfg = (cfg.get("labels") or {}) if isinstance(cfg.get("labels"), Mapping) else {}
+    pct_move = labels_cfg.get("pct_move")
+    horizons = labels_cfg.get("horizons_min") if isinstance(labels_cfg.get("horizons_min"), list) else None
     for sym in eff.symbols:
         data_dir = data_root / sym
         price = _extract_price_close(data_dir)
         alerts_fp = artifacts_root / "alerts" / f"{sym}.csv"
         al = _read_alerts(alerts_fp)
-        html = _render_html(sym, price, al)
+        # Build per-symbol eval info for the panel
+        em = None
+        try:
+            sym_stats = (eval_metrics.get("symbols") or {}).get(sym) if isinstance(eval_metrics.get("symbols"), Mapping) else None
+            if isinstance(sym_stats, Mapping):
+                em = {
+                    "pct_move": pct_move,
+                    "horizons": horizons,
+                    "storm_count": sym_stats.get("storm_count"),
+                    "true_positive": sym_stats.get("true_positive"),
+                    "precision": sym_stats.get("precision"),
+                    "avg_lead_min": sym_stats.get("avg_lead_min"),
+                }
+        except Exception:
+            em = None
+        html = _render_html(sym, price, al, eval_info=em)
         (out_root / f"{sym}_price_alert.html").write_text(html, encoding="utf-8")
     # Write a simple index to navigate reports
     try:
