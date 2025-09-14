@@ -71,7 +71,7 @@ resolve_sleep_hours() {
     echo "$sh"
     return
   fi
-  python - <<PY || echo 8
+  python - "$cfg" <<'PY' || echo 8
 import json,sys
 from pathlib import Path
 try:
@@ -87,8 +87,6 @@ try:
 except Exception:
   print(8)
 PY
-  \
-  "$cfg"
 }
 
 SLEEP_HOURS_EFF=$(resolve_sleep_hours "$CONFIG")
@@ -103,4 +101,3 @@ while true; do
   echo "[trainer] $(date -u +%F\ %T) sleeping ${SLEEP_HOURS_EFF}h"
   sleep $(( SLEEP_HOURS_EFF * 3600 ))
 done
-
