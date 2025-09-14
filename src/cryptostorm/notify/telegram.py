@@ -32,7 +32,7 @@ def _utc_iso(ts_ms: int) -> str:
         return str(ts_ms)
 
 
-def _send_telegram(token: str, chat_id: str, text: str, *, parse_mode: Optional[str] = None, disable_notification: bool = False) -> None:
+def _send_telegram(token: str, chat_id: str, text: str, *, parse_mode: Optional[str] = None, disable_notification: bool = False) -> Optional[int]:
     import urllib.parse
     import urllib.request
 
@@ -47,8 +47,28 @@ def _send_telegram(token: str, chat_id: str, text: str, *, parse_mode: Optional[
     payload = urllib.parse.urlencode(data).encode("utf-8")
     req = urllib.request.Request(base, data=payload)
     with urllib.request.urlopen(req, timeout=15) as resp:
-        # Best-effort read to raise for HTTP errors; ignore body
-        resp.read()
+        body = resp.read().decode("utf-8", errors="replace")
+        try:
+            data = json.loads(body)
+            # Telegram returns { ok: true, result: { message_id: ..., ... } }
+            if isinstance(data, dict) and isinstance(data.get("result"), dict):
+                mid = data["result"].get("message_id")
+                if isinstance(mid, int):
+                    return mid
+        except Exception:
+            # Ignore parse errors; treat as sent without ID
+            pass
+    return None
+
+
+def _append_send_log(path: Path, entry: Mapping[str, object]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, separators=(",", ":")) + "\n")
+    except Exception:
+        # best-effort; never raise from logging
+        pass
 
 
 def _load_sent_registry(path: Path) -> Dict[str, bool]:
@@ -254,7 +274,25 @@ def main(argv: Optional[List[str]] = None) -> int:
             if eff_dry:
                 print("DRY: ", text)
             else:
-                _send_telegram(token=token, chat_id=chat_id, text=text)
+                mid = _send_telegram(token=token, chat_id=chat_id, text=text)
+                # Append a send log entry (what was actually sent)
+                try:
+                    now_ms = int(time.time() * 1000)
+                    entry = {
+                        "sent_at_ms": now_ms,
+                        "sent_at_iso": _utc_iso(now_ms),
+                        "run_id": run_id,
+                        "symbol": sym,
+                        "kind": kind,
+                        "bar_ts": ts,
+                        "score": (float(score) if isinstance(score, (int, float)) else None),
+                        "threshold": (float(thr) if isinstance(thr, (int, float)) else None),
+                        "message_id": (int(mid) if isinstance(mid, int) else None),
+                        "text_len": len(text),
+                    }
+                    _append_send_log(artifacts_root / "alerts" / "telegram_send.jsonl", entry)
+                except Exception:
+                    pass
                 time.sleep(0.2)
             if isinstance(sent, dict):
                 sent[key] = True
