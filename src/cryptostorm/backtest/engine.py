@@ -240,6 +240,65 @@ def _symbol_tier(cfg: Mapping[str, Any], symbol: str) -> str:
     return "default"
 
 
+# -------------------------
+# Threshold resolution helpers
+# -------------------------
+
+def _cfg_get(cfg: Any, dotted: str, default: Any = None) -> Any:
+    """Safe nested get for dict-like or attr-like configs.
+
+    Supports dictionaries (mapping) and simple attribute namespaces. Returns default when
+    any intermediate is missing. Does not raise.
+    """
+    parts = dotted.split(".")
+    cur: Any = cfg
+    for i, part in enumerate(parts):
+        try:
+            if isinstance(cur, Mapping):  # type: ignore[arg-type]
+                if part in cur:
+                    cur = cur[part]  # type: ignore[index]
+                else:
+                    return default
+            else:
+                if hasattr(cur, part):
+                    cur = getattr(cur, part)
+                else:
+                    return default
+        except Exception:
+            return default
+    return cur if cur is not None else default
+
+
+def resolve_threshold_q(cfg: Mapping[str, Any] | Any, symbol: str, *, tier: Optional[str]) -> float:
+    """Resolve effective threshold quantile for a symbol.
+
+    Precedence: per_symbol > per_tier > per_tier['default'] > global model.threshold_q
+    """
+    # Global default
+    q_global = float(_cfg_get(cfg, "model.threshold_q", 0.985) or 0.985)
+
+    # Per-symbol override
+    per_symbol = _cfg_get(cfg, "model.threshold_q_per_symbol", {}) or {}
+    try:
+        if isinstance(per_symbol, Mapping) and symbol in per_symbol:
+            return float(per_symbol[symbol])  # type: ignore[index]
+    except Exception:
+        pass
+
+    # Per-tier override
+    per_tier = _cfg_get(cfg, "model.threshold_q_per_tier", {}) or {}
+    try:
+        if isinstance(per_tier, Mapping):
+            if tier and tier in per_tier:
+                return float(per_tier[tier])  # type: ignore[index]
+            if "default" in per_tier:
+                return float(per_tier["default"])  # type: ignore[index]
+    except Exception:
+        pass
+
+    return float(q_global)
+
+
 def _retrain_block(ts: int, every_hours: int) -> int:
     block_ms = every_hours * 60 * 60 * 1000
     return (ts // block_ms) * block_ms
@@ -322,7 +381,9 @@ def _backtest_one_symbol(
         tier = _symbol_tier(cfg, sym)
         params = {**if_defaults, **(per_tier.get(tier) or {})}
         train_scores, eval_scores = _iforest_scores(X_train, X_eval, params, random_state)
-        thr = _quantile(train_scores, threshold_q)
+        # Resolve effective quantile per symbol/tier
+        q_eff = resolve_threshold_q(cfg, sym, tier=tier)
+        thr = _quantile(train_scores, q_eff)
         # Record artifact snapshot (latest wins)
         last_artifact = {
             "features": features,
@@ -635,7 +696,8 @@ def run_backtest(
             tier = _symbol_tier(cfg, sym)
             params = {**if_defaults, **(per_tier.get(tier) or {})}
             train_scores, eval_scores = _iforest_scores(X_train, X_eval, params, random_state)
-            thr = _quantile(train_scores, threshold_q)
+            q_eff = resolve_threshold_q(cfg, sym, tier=tier)
+            thr = _quantile(train_scores, q_eff)
             # Record artifact snapshot (latest wins)
             last_artifact = {
                 "features": features,

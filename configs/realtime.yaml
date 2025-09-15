@@ -3,8 +3,8 @@ run:
   artifacts_root: ./artifacts
 universe:
   symbols:
-  - MUSDT
-  - BTCUSDT
+  - NOTUSDT
+  - ATOMUSDT
   tiering:
     A:
     - BTCUSDT
@@ -176,6 +176,8 @@ conventions:
     ONEUSDT: ONE
     MUSDT: M
     TAUSDT: TA
+    NEIROUSDT: NEIRO
+    FETUSDT: FET
   units:
     taker_volume: base
     liquidation_notional: USDT
