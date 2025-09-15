@@ -1,0 +1,92 @@
+name: CryptoStorm Realtime Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
+      config_path:
+        description: Path to config file
+        required: true
+        default: configs/top.yaml
+      q_grid:
+        description: Quantile grid for tuning (comma-separated)
+        required: true
+        default: 0.972,0.976,0.979,0.982,0.985,0.988,0.990,0.992,0.994,0.996
+      features_interval:
+        description: Features cadence (5m|15m)
+        required: true
+        default: 15m
+      run_backfill:
+        description: Run initial backfill (once)
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: cryptostorm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-tune:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build compose images
+        run: docker compose build
+
+      - name: Validate config (no env required)
+        run: |
+          docker compose run --rm backfill python -m cryptostorm validate "${{ inputs.config_path }}" --no-require-env
+
+      - name: Backfill once (optional)
+        if: inputs.run_backfill == 'true'
+        env:
+          COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
+        run: |
+          # One-shot backfill to seed data, features and initial artifacts
+          docker compose run --rm -e COINGLASS_API_KEY="$COINGLASS_API_KEY" backfill
+
+      - name: Threshold tuning sweep (q-grid)
+        env:
+          COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
+        run: |
+          docker compose run --rm -e COINGLASS_API_KEY="$COINGLASS_API_KEY" backfill \
+            bash -lc "python scripts/tune_thresholds.py \
+              --config ${{ inputs.config_path }} \
+              --features features \
+              --features-interval ${{ inputs.features_interval }} \
+              --q-grid '${{ inputs.q_grid }}' \
+              --artifacts-root artifacts/tuning"
+
+      - name: Upload tuning artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: tuning-artifacts
+          path: |
+            artifacts/tuning
+            !artifacts/tuning/**/config_q_*.yaml
+          if-no-files-found: warn
+
+      - name: Upload reports (if generated)
+        if: inputs.run_backfill == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: reports
+          if-no-files-found: warn
+
+      # Optional deployment step placeholder (requires self-hosted runner or SSH)
+      # - name: Deploy realtime services
+      #   if: ${{ github.ref == 'refs/heads/main' }}
+      #   env:
+      #     COINGLASS_API_KEY: ${{ secrets.COINGLASS_API_KEY }}
+      #     TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      #     TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      #   run: |
+      #     docker compose up -d realtime trainer api
+
