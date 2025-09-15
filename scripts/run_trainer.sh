@@ -95,9 +95,60 @@ if [[ "$SLEEP_HOURS_EFF" -lt 1 ]]; then SLEEP_HOURS_EFF=8; fi
 
 echo "trainer: config=$CONFIG features_interval=$FEATURES_INTERVAL workers=$WORKERS sleep_hours=$SLEEP_HOURS_EFF"
 
+# Resolve artifacts root/run_id for lock and notifications
+resolve_artifacts_root() {
+  python - "$CONFIG" <<'PY'
+import json,sys
+from pathlib import Path
+try:
+  p=Path(sys.argv[1])
+  txt=p.read_text(encoding='utf-8')
+  if p.suffix.lower() in {'.yaml','.yml'}:
+    import yaml
+    cfg=yaml.safe_load(txt) or {}
+  else:
+    cfg=json.loads(txt)
+  run=cfg.get('run') or {}
+  root=(run.get('artifacts_root') or './artifacts')
+  run_id=(run.get('run_id') or 'run')
+  print(f"{root}/{run_id}")
+except Exception:
+  print('./artifacts/run')
+PY
+}
+
+ARTIFACTS_DIR=$(resolve_artifacts_root)
+LOCK_DIR="$ARTIFACTS_DIR/.locks"
+LOCK_FILE="$LOCK_DIR/retraining.lock"
+
+notify_telegram() {
+  local text="$1"
+  local token="${TELEGRAM_BOT_TOKEN:-}"
+  local chat="${TELEGRAM_CHAT_ID:-}"
+  if [[ -z "$token" && -n "${TELEGRAM_BOT_TOKEN_FILE:-}" && -f "$TELEGRAM_BOT_TOKEN_FILE" ]]; then
+    token=$(cat "$TELEGRAM_BOT_TOKEN_FILE" 2>/dev/null || true)
+  fi
+  if [[ -z "$chat" && -n "${TELEGRAM_CHAT_ID_FILE:-}" && -f "$TELEGRAM_CHAT_ID_FILE" ]]; then
+    chat=$(cat "$TELEGRAM_CHAT_ID_FILE" 2>/dev/null || true)
+  fi
+  if [[ -z "$token" || -z "$chat" ]]; then
+    echo "trainer: telegram credentials not set; skipping notify"
+    return 0
+  fi
+  curl -sS -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+    -d chat_id="${chat}" --data-urlencode text="$text" -d disable_notification=false >/dev/null || true
+}
+
+trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
 while true; do
+  echo "[trainer] $(date -u +%F\ %T) acquiring training lock at $LOCK_FILE"
+  mkdir -p "$LOCK_DIR"
+  date -u +%F\ %T >"$LOCK_FILE" || true
   echo "[trainer] $(date -u +%F\ %T) running backtest (train)"
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
+  rm -f "$LOCK_FILE" || true
+  NOW_UTC=$(date -u +%F\ %T)
+  notify_telegram "🌐 CryptoStorm Trainer: retrained models for $(basename "$ARTIFACTS_DIR") at ${NOW_UTC} UTC"
   echo "[trainer] $(date -u +%F\ %T) sleeping ${SLEEP_HOURS_EFF}h"
   sleep $(( SLEEP_HOURS_EFF * 3600 ))
 done

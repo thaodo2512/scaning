@@ -198,6 +198,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     features_root = Path(args.features)
     artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
 
+    # Helper: check training lock to avoid races with trainer
+    def _training_locked() -> bool:
+        try:
+            lp = artifacts_root / ".locks" / "retraining.lock"
+            return lp.exists()
+        except Exception:
+            return False
+
     # Resolve workers (0=auto)
     try:
         import os as _os
@@ -218,6 +226,10 @@ def main(argv: Optional[list[str]] = None) -> int:
         pass
 
     if args.once:
+        # Respect training lock: skip this cycle to avoid conflicts
+        if _training_locked():
+            logging.getLogger("cryptostorm.realtime").info("training lock present; skipping realtime cycle")
+            return 0
         _cycle_start = time.monotonic()
         step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
         bar_ts = _utc_now_ms() - (_utc_now_ms() % step_ms)
@@ -355,6 +367,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     LOG = logging.getLogger("cryptostorm.realtime")
     LOG.info("Realtime loop started: offset=%.1fs jitter≤%.1fs", args.poll_offset_s, args.jitter_s)
     while True:
+        # If trainer is running, pause this cycle
+        if _training_locked():
+            logging.getLogger("cryptostorm.realtime").info("training lock present; sleeping until next bar")
+            # Sleep to next bar offset directly
+            step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+            next_target = (_utc_now_ms() - (_utc_now_ms() % step_ms)) + step_ms + int(args.poll_offset_s * 1000)
+            _sleep_until(next_target, args.jitter_s)
+            continue
         now = _utc_now_ms()
         step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
         bar_ts = now - (now % step_ms)

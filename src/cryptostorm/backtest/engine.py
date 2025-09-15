@@ -456,7 +456,8 @@ def _backtest_one_symbol(
         if features:
             stats_fallback, X_train_fb, _ = _fit_iforest_train_matrix(train_rows, features, clip_low, clip_high)
             train_scores_fb, _ = _iforest_scores(X_train_fb, X_train_fb, if_defaults, random_state)
-            thr_fb = _quantile(train_scores_fb, threshold_q)
+            q_eff_fb = resolve_threshold_q(cfg, sym, tier=tier)
+            thr_fb = _quantile(train_scores_fb, q_eff_fb)
             last_artifact = {
                 "features": features,
                 "stats": stats_fallback,
