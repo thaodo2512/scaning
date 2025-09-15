@@ -22,6 +22,7 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated q values to sweep (default: 10-run grid)",
     )
     p.add_argument("--artifacts-root", default="artifacts/tuning", help="Artifacts root for sweep outputs")
+    p.add_argument("--workers", type=int, default=0, help="Backtest workers (0=auto; default: auto)")
     p.add_argument("--symbols", default="", help="Optional comma-separated allowlist of symbols")
     # Targets
     p.add_argument("--target-storms-day-min", type=float, default=0.5)
@@ -69,6 +70,15 @@ def _run_backtest_for_q(base_cfg: Path, q: float, args: argparse.Namespace) -> N
     tmp_cfg = root / f"config_q_{q:.3f}.yaml"
     _dump_config(cfg, tmp_cfg)
     # Run backtest
+    # Resolve workers (default: auto from CPU count)
+    try:
+        workers = int(args.workers)
+        if workers <= 0:
+            import os as _os
+            workers = int(_os.cpu_count() or 1)
+    except Exception:
+        workers = 1
+
     cmd = [
         sys.executable,
         "-m",
@@ -81,6 +91,8 @@ def _run_backtest_for_q(base_cfg: Path, q: float, args: argparse.Namespace) -> N
         args.features_interval,
         "--artifacts-root",
         str(root),
+        "--workers",
+        str(workers),
     ]
     if args.symbols:
         # Not natively supported by CLI yet; keep placeholder for future expansion

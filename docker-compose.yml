@@ -5,7 +5,6 @@ services:
     environment:
       - PYTHONPATH=/app/src
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
-      - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
     command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --online --once --build-reports --report-engine price --poll-offset-s 15"]
@@ -18,7 +17,6 @@ services:
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
       - TELEGRAM_BOT_TOKEN_FILE=/app/secrets/telegram_bot_token.txt
       - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
-      - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
     command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --online --watch --poll-offset-s 15 --jitter-s 2 --build-reports --report-engine price --send-telegram --telegram-kinds storm,pre_alert"]
@@ -32,7 +30,6 @@ services:
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
       - TELEGRAM_BOT_TOKEN_FILE=/app/secrets/telegram_bot_token.txt
       - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
-      - CRYPTOSTORM_WORKERS=0
     volumes:
       - ./:/app
     # Looping trainer: backtest (train) then sleep model.retrain_every_hours (default 8h)
