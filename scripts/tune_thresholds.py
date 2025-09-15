@@ -16,7 +16,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--config", required=True, help="Path to base config (YAML/JSON)")
     p.add_argument("--features", required=True, help="Features directory")
     p.add_argument("--features-interval", default="15m", choices=["5m", "15m"], help="Features cadence")
-    p.add_argument("--q-grid", default="0.97,0.98,0.985,0.99,0.992,0.995", help="Comma-separated q values to sweep")
+    p.add_argument(
+        "--q-grid",
+        default="0.972,0.976,0.979,0.982,0.985,0.988,0.990,0.992,0.994,0.996",
+        help="Comma-separated q values to sweep (default: 10-run grid)",
+    )
     p.add_argument("--artifacts-root", default="artifacts/tuning", help="Artifacts root for sweep outputs")
     p.add_argument("--symbols", default="", help="Optional comma-separated allowlist of symbols")
     # Targets
@@ -254,4 +258,3 @@ def main() -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
