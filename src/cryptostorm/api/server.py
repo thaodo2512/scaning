@@ -93,6 +93,27 @@ def _build_app(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path,
     def healthz():
         return {"ok": True}
 
+    @app.get("/")
+    def root():
+        # Serve reports index.html by default if available
+        fp = reports_root / "index.html"
+        if fp.exists():
+            return HTMLResponse(fp.read_text(encoding="utf-8"))
+        # Fallback: simple landing page with helpful links
+        html = (
+            "<!doctype html><html><head><meta charset='utf-8'><title>CryptoStorm API</title>"
+            "<style>body{font-family:-apple-system,system-ui,Segoe UI,Roboto,sans-serif;background:#111;color:#ddd;margin:0}"
+            ".wrap{padding:14px} a{color:#9bd;text-decoration:none}</style></head><body><div class='wrap'>"
+            "<h2>CryptoStorm API</h2>"
+            "<p>No reports index found at <code>" + str(fp) + "</code>.</p>"
+            "<ul>"
+            "<li><a href='/docs'>/docs</a> (Swagger UI)</li>"
+            "<li><a href='/healthz'>/healthz</a></li>"
+            "</ul>"
+            "</div></body></html>"
+        )
+        return HTMLResponse(html)
+
     @app.get("/symbols")
     def symbols(_: None = Depends(_auth_dep)):
         return {"symbols": eff.symbols}
