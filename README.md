@@ -164,9 +164,10 @@
 
 ## Auto‑select Top Binance Symbols
 - Populate `universe.symbols` with the top USDT‑perp contracts by quote volume (simple, deterministic):
-  - `PYTHONPATH=src python -m cryptostorm binance-top --top 100 --data data --out configs/realtime.yaml --print`
-  - Prefers local Coinglass data under `data/<SYM>/futures_ohlcv_{15m|5m}.jsonl`; otherwise falls back to Binance.
-  - Ranks by `(−vol30d_quote, −vol24h_quote, symbol)` and writes exactly `--top` symbols.
+  - `PYTHONPATH=src python -m cryptostorm binance-top --top 200 --out configs/realtime.yaml --print`
+  - Binance-first: candidates come from Binance (USDT‑M PERPETUAL) so you can select exactly `--top` even when local data is sparse. If Binance is unavailable, the tool falls back to local Coinglass data under `data/<SYM>/futures_ohlcv_{15m|5m}.jsonl`.
+  - Metrics source is hybrid: for symbols that exist under `data/`, local Coinglass JSONL is used to compute volumes deterministically; otherwise Binance daily klines + 24h ticker are used.
+  - Ranks by `(−vol30d_quote, −vol24h_quote, symbol)` and writes exactly `--top` symbols when candidates allow.
 
   - AI ranking removed: the tool now uses a simple deterministic volume-based ranking only.
 

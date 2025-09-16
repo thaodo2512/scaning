@@ -267,16 +267,27 @@ def _coinglass_local_metrics(symbol: str, data_root: Path, now_ms: Optional[int]
 
 
 def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = False, data_root: Optional[Path] = None) -> List[RankRow]:
-    # Prefer local Coinglass data for candidates and metrics if present
-    symbols: List[str] = []
-    if data_root is not None:
+    """Select top USDT‑perp symbols by quote volume.
+
+    Behavior change: Binance-first. Fetch the candidate list from Binance regardless
+    of local data presence so we can return exactly `--top` when possible. If the
+    Binance call fails or returns nothing (e.g., network issues/418), fall back to
+    local Coinglass data under `data/`.
+
+    Metric sourcing remains hybrid: when computing per-symbol metrics, prefer local
+    Coinglass JSONL for symbols that exist under `data/` to keep determinism; otherwise
+    compute from Binance endpoints.
+    """
+    # Binance-first candidate set
+    symbols: List[str] = _futures_usdt_perp_symbols(verbose=verbose)
+    if not symbols and data_root is not None:
+        # Fallback to local data only if Binance list is unavailable
+        if verbose:
+            print("[binance-top] Binance candidates unavailable; falling back to local data", flush=True)
         symbols = _symbols_from_data(data_root, verbose=verbose)
     if not symbols:
-        # Fallback to Binance symbol list (may fail behind 418)
-        symbols = _futures_usdt_perp_symbols(verbose=verbose)
-    if not symbols:
         if verbose:
-            print("[binance-top] No symbols available from data or Binance", flush=True)
+            print("[binance-top] No symbols available from Binance or local data", flush=True)
         return []
     # At this point, 'symbols' contains either local candidates from data/ or Binance list
     # Optional test limiter to reduce calls in dev/CI

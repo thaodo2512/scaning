@@ -150,10 +150,11 @@ Updated behaviors (2025‑09‑13):
   - Retrieval: strict empty handling (opt‑in), failure‑only HTTP dumps, dynamic slice clamp; default `slice_days: 10` in configs.
   - Realtime: passes cadence explicitly to backtest/online scoring; Telegram defaults standardized.
   - Audit: `--soft-fail` added; E2E uses soft‑fail.
-- Universe: `binance-top` is intentionally simple and deterministic, and prefers local Coinglass data:
-  - Data-first: enumerate symbols from `data/<SYM>/` having `futures_ohlcv_{15m|5m}.jsonl` and compute `vol30d_quote` and `vol24h_quote` by summing `payload.volume_usd` over the last 30 days / 24h. This avoids live Binance calls and remains reproducible.
-  - Fallback: if no local data exists, fetch from Binance (`exchangeInfo` + 1d klines + 24h ticker) to compute the same metrics.
-  - Rank: sort by (−vol30d_quote, −vol24h_quote, symbol); return exactly `--top`.
+ - Universe: `binance-top` is intentionally simple and deterministic, Binance‑first:
+  - Binance-first: enumerate USDT‑M PERPETUAL symbols from Binance (`exchangeInfo`) and compute metrics via daily klines + 24h ticker so we can return exactly `--top` even when local data is sparse.
+  - Fallback: if Binance is unavailable, fall back to local Coinglass data under `data/<SYM>/` (prefer reproducibility when network is blocked).
+  - Metrics: when local Coinglass JSONL exists for a symbol, use local data to compute quote volumes deterministically; otherwise compute from Binance.
+  - Rank: sort by (−vol30d_quote, −vol24h_quote, symbol); return exactly `--top` when candidates allow.
   - AI option removed; selection is deterministic by volume.
 
 - Troubleshooting
