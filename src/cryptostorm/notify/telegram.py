@@ -61,6 +61,19 @@ def _send_telegram(token: str, chat_id: str, text: str, *, parse_mode: Optional[
     return None
 
 
+def _parse_chat_ids_from_str(s: Optional[str]) -> List[str]:
+    if not s:
+        return []
+    # Accept comma or newline separated
+    parts = [p.strip() for p in str(s).replace("\n", ",").split(",")]
+    return [p for p in parts if p]
+
+
+def _parse_chat_ids_from_file(path: Optional[str]) -> List[str]:
+    txt = _read_file(path)
+    return _parse_chat_ids_from_str(txt)
+
+
 def _append_send_log(path: Path, entry: Mapping[str, object]) -> None:
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -179,11 +192,30 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Resolve token/chat from env or files or config
     token = os.getenv("TELEGRAM_BOT_TOKEN") or _read_file(os.getenv("TELEGRAM_BOT_TOKEN_FILE"))
-    chat_id = os.getenv("TELEGRAM_CHAT_ID") or _read_file(os.getenv("TELEGRAM_CHAT_ID_FILE"))
+    chat_env = os.getenv("TELEGRAM_CHAT_ID") or _read_file(os.getenv("TELEGRAM_CHAT_ID_FILE"))
     if not token:
         token = (tg_cfg.get("bot_token") if isinstance(tg_cfg.get("bot_token"), str) else None) or _read_file(tg_cfg.get("bot_token_file"))
-    if not chat_id:
+    # Build recipients list from env, files, or config
+    recipients: List[str] = []
+    # 1) Env value or file (comma/newline separated supported)
+    recipients.extend(_parse_chat_ids_from_str(chat_env))
+    if not recipients:
+        recipients.extend(_parse_chat_ids_from_file(os.getenv("TELEGRAM_CHAT_ID_FILE")))
+    # 2) Config list chat_ids or file
+    chat_ids_cfg = tg_cfg.get("chat_ids") if isinstance(tg_cfg, dict) else None
+    if isinstance(chat_ids_cfg, list):
+        for v in chat_ids_cfg:
+            try:
+                if isinstance(v, (str, int)):
+                    recipients.append(str(v).strip())
+            except Exception:
+                continue
+    if not recipients:
+        recipients.extend(_parse_chat_ids_from_file(tg_cfg.get("chat_ids_file")))
+    # 3) Fallback single chat_id or chat_id_file
+    if not recipients:
         chat_id = (tg_cfg.get("chat_id") if isinstance(tg_cfg.get("chat_id"), str) else None) or _read_file(tg_cfg.get("chat_id_file"))
+        recipients.extend(_parse_chat_ids_from_str(chat_id))
 
     # Effective dry_run and since_ts / only_new
     eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
@@ -219,8 +251,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     eff_limit = int(args.limit) if args.limit is not None else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) else None)
     eff_cooldown_min = int(args.cooldown_min) if args.cooldown_min is not None else (int(tg_cfg.get("cooldown_min")) if isinstance(tg_cfg.get("cooldown_min"), (int, float)) else None)
 
-    if not eff_dry and (not token or not chat_id):
-        print("error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must be set (or *_FILE)")
+    # Deduplicate and sanitize recipients
+    recipients = [r for r in {r for r in recipients if r}]
+
+    if not eff_dry and (not token or not recipients):
+        print("error: TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID(S) must be set (or *_FILE / config)")
         return 2
 
     rows = _iter_alert_rows(alerts_dir, eff.symbols, kinds, eff_since_ts)
@@ -300,26 +335,35 @@ def main(argv: Optional[List[str]] = None) -> int:
             if eff_dry:
                 print("DRY: ", text)
             else:
-                mid = _send_telegram(token=token, chat_id=chat_id, text=text)
-                # Append a send log entry (what was actually sent)
-                try:
-                    now_ms = int(time.time() * 1000)
-                    entry = {
-                        "sent_at_ms": now_ms,
-                        "sent_at_iso": _utc_iso(now_ms),
-                        "run_id": run_id,
-                        "symbol": sym,
-                        "kind": kind,
-                        "bar_ts": ts,
-                        "score": (float(score) if isinstance(score, (int, float)) else None),
-                        "threshold": (float(thr) if isinstance(thr, (int, float)) else None),
-                        "message_id": (int(mid) if isinstance(mid, int) else None),
-                        "text_len": len(text),
-                    }
-                    _append_send_log(artifacts_root / "alerts" / "telegram_send.jsonl", entry)
-                except Exception:
-                    pass
-                time.sleep(0.2)
+                # Send to all recipients
+                last_mid: Optional[int] = None
+                for rcp in recipients:
+                    try:
+                        mid = _send_telegram(token=token, chat_id=rcp, text=text)
+                        last_mid = mid or last_mid
+                        # Append a send log entry (what was actually sent)
+                        try:
+                            now_ms = int(time.time() * 1000)
+                            entry = {
+                                "sent_at_ms": now_ms,
+                                "sent_at_iso": _utc_iso(now_ms),
+                                "run_id": run_id,
+                                "symbol": sym,
+                                "kind": kind,
+                                "bar_ts": ts,
+                                "chat_id": rcp,
+                                "score": (float(score) if isinstance(score, (int, float)) else None),
+                                "threshold": (float(thr) if isinstance(thr, (int, float)) else None),
+                                "message_id": (int(mid) if isinstance(mid, int) else None),
+                                "text_len": len(text),
+                            }
+                            _append_send_log(artifacts_root / "alerts" / "telegram_send.jsonl", entry)
+                        except Exception:
+                            pass
+                        time.sleep(0.2)
+                    except Exception as e:
+                        print(f"warn: failed to send alert to {rcp} for {sym} {kind} {ts}: {e}")
+                        continue
             if isinstance(sent, dict):
                 sent[key] = True
             last_by_symbol[sym] = ts

@@ -170,19 +170,26 @@ PY
 notify_telegram() {
   local text="$1"
   local token="${TELEGRAM_BOT_TOKEN:-}"
-  local chat="${TELEGRAM_CHAT_ID:-}"
+  local chat_raw="${TELEGRAM_CHAT_ID:-}"
   if [[ -z "$token" && -n "${TELEGRAM_BOT_TOKEN_FILE:-}" && -f "$TELEGRAM_BOT_TOKEN_FILE" ]]; then
     token=$(cat "$TELEGRAM_BOT_TOKEN_FILE" 2>/dev/null || true)
   fi
-  if [[ -z "$chat" && -n "${TELEGRAM_CHAT_ID_FILE:-}" && -f "$TELEGRAM_CHAT_ID_FILE" ]]; then
-    chat=$(cat "$TELEGRAM_CHAT_ID_FILE" 2>/dev/null || true)
+  if [[ -z "$chat_raw" && -n "${TELEGRAM_CHAT_ID_FILE:-}" && -f "$TELEGRAM_CHAT_ID_FILE" ]]; then
+    chat_raw=$(cat "$TELEGRAM_CHAT_ID_FILE" 2>/dev/null || true)
   fi
-  if [[ -z "$token" || -z "$chat" ]]; then
+  if [[ -z "$token" || -z "$chat_raw" ]]; then
     echo "trainer: telegram credentials not set; skipping notify"
     return 0
   fi
-  curl -sS -X POST "https://api.telegram.org/bot${token}/sendMessage" \
-    -d chat_id="${chat}" --data-urlencode text="$text" -d disable_notification=false >/dev/null || true
+  # Support multiple chat IDs: comma or newline separated
+  # Normalize delimiters to spaces
+  local chats
+  chats=$(echo "$chat_raw" | tr ',\n' '  ')
+  for cid in $chats; do
+    curl -sS -X POST "https://api.telegram.org/bot${token}/sendMessage" \
+      -d chat_id="${cid}" --data-urlencode text="$text" -d disable_notification=false >/dev/null || true
+    sleep 0.2
+  done
 }
 
 trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
