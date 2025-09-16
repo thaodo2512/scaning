@@ -144,11 +144,79 @@ while true; do
   echo "[trainer] $(date -u +%F\ %T) acquiring training lock at $LOCK_FILE"
   mkdir -p "$LOCK_DIR"
   date -u +%F\ %T >"$LOCK_FILE" || true
+  # Snapshot current thresholds before retrain (best-effort)
+  python - "$ARTIFACTS_DIR" <<'PY' || true
+import json,sys,glob,os
+from pathlib import Path
+art=Path(sys.argv[1])
+models=art/ 'models'
+m={}
+for fp in sorted(models.glob('*.json')):
+  try:
+    obj=json.loads(fp.read_text(encoding='utf-8') or '{}')
+    th=obj.get('threshold')
+    if isinstance(th,(int,float)):
+      m[fp.stem]=float(th)
+  except Exception:
+    pass
+lockdir=art/'.locks'
+lockdir.mkdir(parents=True, exist_ok=True)
+(lockdir/'thresholds_before.json').write_text(json.dumps(m, separators=(',',':')), encoding='utf-8')
+PY
   echo "[trainer] $(date -u +%F\ %T) running backtest (train)"
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
   rm -f "$LOCK_FILE" || true
+  # Build threshold-change summary (best-effort)
+  TH_MSG=$(python - <<'PY'
+import json, os, glob, sys, math, datetime as dt
+from pathlib import Path
+art = Path(os.environ.get('ARTIFACTS_DIR','artifacts/run'))
+models = art/ 'models'
+def load_map():
+    m = {}
+    for fp in sorted(models.glob('*.json')):
+        try:
+            obj=json.loads(fp.read_text(encoding='utf-8') or '{}')
+            th = obj.get('threshold')
+            if isinstance(th,(int,float)):
+                m[fp.stem]=float(th)
+        except Exception:
+            continue
+    return m
+before_fp = art/'.locks'/'thresholds_before.json'
+try:
+    before = json.loads(before_fp.read_text(encoding='utf-8')) if before_fp.exists() else {}
+except Exception:
+    before = {}
+after = load_map()
+total = len(after)
+changes = []
+for sym, new in after.items():
+    old = before.get(sym)
+    if isinstance(old,(int,float)):
+        if not math.isclose(old, new, rel_tol=1e-9, abs_tol=1e-12):
+            dpct = (new-old)/old*100.0 if old!=0 else float('inf')
+            changes.append((sym, old, new, dpct))
+    else:
+        # new symbol
+        changes.append((sym, float('nan'), new, float('inf')))
+changes.sort(key=lambda x: (abs(x[3]) if math.isfinite(x[3]) else 1e9), reverse=True)
+ts = dt.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+run_id = os.path.basename(str(art))
+lines = [f"⚙️ Thresholds updated — {run_id} (UTC {ts})", f"changed: {len(changes)}/{total} symbols"]
+top = changes[:10]
+if top:
+    lines.append('Top changes:')
+    for sym, old, new, dpct in top:
+        if math.isfinite(dpct) and not math.isnan(old):
+            lines.append(f"{sym} {old:.3f}→{new:.3f} ({dpct:+.1f}%)")
+        else:
+            lines.append(f"{sym} new→{new:.3f}")
+print("\n".join(lines))
+PY
+  )
   NOW_UTC=$(date -u +%F\ %T)
-  notify_telegram "🌐 CryptoStorm Trainer: retrained models for $(basename "$ARTIFACTS_DIR") at ${NOW_UTC} UTC"
+  notify_telegram "$TH_MSG"
   echo "[trainer] $(date -u +%F\ %T) sleeping ${SLEEP_HOURS_EFF}h"
   sleep $(( SLEEP_HOURS_EFF * 3600 ))
 done
