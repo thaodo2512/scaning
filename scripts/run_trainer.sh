@@ -146,6 +146,24 @@ while true; do
   date -u +%F\ %T >"$LOCK_FILE" || true
   # Optionally refresh universe.symbols before retrain (default on)
   if [[ "${TRAINER_REFRESH_SYMBOLS:-1}" == "1" ]]; then
+    # Snapshot symbols before refresh
+    python - "$CONFIG" <<'PY' || true
+import json,sys
+from pathlib import Path
+try:
+  p=Path(sys.argv[1]); txt=p.read_text(encoding='utf-8')
+  if p.suffix.lower() in {'.yaml','.yml'}:
+    import yaml
+    cfg=yaml.safe_load(txt) or {}
+  else:
+    cfg=json.loads(txt)
+  syms=list((cfg.get('universe') or {}).get('symbols') or [])
+  out={'symbols': syms}
+  lockdir=Path("$LOCK_DIR"); lockdir.mkdir(parents=True, exist_ok=True)
+  (lockdir/ 'symbols_before.json').write_text(json.dumps(out, separators=(',',':')), encoding='utf-8')
+except Exception:
+  pass
+PY
     TOP_N=$(python - <<'PY' "$CONFIG" || echo 100)
 import json,sys
 from pathlib import Path
@@ -164,6 +182,42 @@ except Exception:
 PY
     echo "[trainer] refreshing symbols (top=$TOP_N)"
     python -m cryptostorm binance-top --top "$TOP_N" --out "$CONFIG" --print || true
+    # Compute symbol delta and write metrics
+    python - <<'PY' "$CONFIG" "$ARTIFACTS_DIR" || true
+import json,sys,datetime as dt
+from pathlib import Path
+cfgp=Path(sys.argv[1]); art=Path(sys.argv[2])
+lockdir=art/'.locks'
+try:
+  before=json.loads((lockdir/'symbols_before.json').read_text(encoding='utf-8'))
+  before_set=set(before.get('symbols') or [])
+except Exception:
+  before_set=set()
+try:
+  txt=cfgp.read_text(encoding='utf-8')
+  if cfgp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml
+    cfg=yaml.safe_load(txt) or {}
+  else:
+    cfg=json.loads(txt)
+  after_set=set((cfg.get('universe') or {}).get('symbols') or [])
+except Exception:
+  after_set=set()
+added=sorted(after_set-before_set)
+removed=sorted(before_set-after_set)
+metrics_dir=art/'metrics'
+metrics_dir.mkdir(parents=True, exist_ok=True)
+stamp=int(dt.datetime.utcnow().timestamp())
+delta={'ts':stamp,'added_count':len(added),'removed_count':len(removed),'added':added,'removed':removed}
+(metrics_dir/'symbol_delta.json').write_text(json.dumps(delta, indent=2), encoding='utf-8')
+with (metrics_dir/'symbol_delta.csv').open('w', encoding='utf-8') as f:
+  f.write('action,symbol\n')
+  for s in added:
+    f.write(f'added,{s}\n')
+  for s in removed:
+    f.write(f'removed,{s}\n')
+print(f"SYMBOL_DELTA added={len(added)} removed={len(removed)}")
+PY
   fi
   # Snapshot current thresholds before retrain (best-effort)
   python - "$ARTIFACTS_DIR" <<'PY' || true
@@ -185,6 +239,7 @@ lockdir.mkdir(parents=True, exist_ok=True)
 (lockdir/'thresholds_before.json').write_text(json.dumps(m, separators=(',',':')), encoding='utf-8')
 PY
   echo "[trainer] $(date -u +%F\ %T) running backtest (train)"
+  TRAIN_START=$(date -u +%s)
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
   rm -f "$LOCK_FILE" || true
   # Build threshold-change summary (best-effort)
@@ -237,7 +292,44 @@ print("\n".join(lines))
 PY
   )
   NOW_UTC=$(date -u +%F\ %T)
-  notify_telegram "$TH_MSG"
+  # Read symbol delta summary line (if present)
+  SYM_LINE=$(grep -m1 '^SYMBOL_DELTA ' "$ARTIFACTS_DIR/.locks/thresholds_before.json" 2>/dev/null || true)
+  # Compute train duration and append to metrics log
+  TRAIN_END=$(date -u +%s)
+  TRAIN_DUR=$((TRAIN_END-TRAIN_START))
+  # Persist trainer run metrics
+  mkdir -p "$ARTIFACTS_DIR/metrics"
+  python - <<'PY' "$ARTIFACTS_DIR" "$TRAIN_START" "$TRAIN_END" || true
+import json,sys,datetime as dt
+from pathlib import Path
+art=Path(sys.argv[1])
+start=int(sys.argv[2]); end=int(sys.argv[3])
+row={'ts':end,'start_ts':start,'end_ts':end,'duration_s':end-start}
+with (art/'metrics'/'trainer_runs.jsonl').open('a', encoding='utf-8') as f:
+  f.write(json.dumps(row)+"\n")
+PY
+  # Compose final message: threshold changes + symbol delta + duration
+  DUR_MIN=$((TRAIN_DUR/60)); DUR_SEC=$((TRAIN_DUR%60))
+  # Read symbol delta counts from metrics if present
+  SYM_COUNTS=$(python - <<'PY' "$ARTIFACTS_DIR" 2>/dev/null || true)
+import json,sys
+from pathlib import Path
+art=Path(sys.argv[1])
+delta=art/'metrics'/'symbol_delta.json'
+try:
+  obj=json.loads(delta.read_text(encoding='utf-8'))
+  add=obj.get('added_count',0) or 0
+  rem=obj.get('removed_count',0) or 0
+  print(f"symbols: +{int(add)} −{int(rem)}")
+except Exception:
+  pass
+PY
+  if [[ -n "$SYM_COUNTS" ]]; then
+    FINAL_MSG="$TH_MSG\n$SYM_COUNTS\ntrain_duration: ${DUR_MIN}m ${DUR_SEC}s"
+  else
+    FINAL_MSG="$TH_MSG\ntrain_duration: ${DUR_MIN}m ${DUR_SEC}s"
+  fi
+  notify_telegram "$FINAL_MSG"
   echo "[trainer] $(date -u +%F\ %T) sleeping ${SLEEP_HOURS_EFF}h"
   sleep $(( SLEEP_HOURS_EFF * 3600 ))
 done

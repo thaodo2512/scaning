@@ -178,7 +178,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--build-reports", action="store_true", help="Build reports after each cycle and update index.html")
     parser.add_argument("--reports", type=str, default="reports", help="Reports output directory")
     parser.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
-    parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
+    parser.add_argument("--bar-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
     parser.add_argument("--workers", type=int, default=0, help="Per-symbol parallel workers for features/backtest (0=auto)")
     parser.add_argument("--coinglass-rps", type=float, default=4.1667, help="Global Coinglass request rate (req/s), capped to ~250/min")
     parser.add_argument("--reload-config", action="store_true", help="Reload config each cycle if the file changes (universe/tuning updates)")
@@ -254,13 +254,23 @@ def main(argv: Optional[list[str]] = None) -> int:
             logging.getLogger("cryptostorm.realtime").info("training lock present; skipping realtime cycle")
             return 0
         _cycle_start = time.monotonic()
-        step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+        # Resolve bar interval when set to auto (infer from config futures_ohlcv)
+        bar_iv = args.bar_interval
+        if bar_iv == "auto":
+            try:
+                iv = (((cfg.get("acquisition") or {}).get("coinglass") or {}).get("intervals") or {}).get("futures_ohlcv", "15m")
+                bar_iv = str(iv)
+            except Exception:
+                bar_iv = "15m"
+        step_ms = 5 * 60 * 1000 if bar_iv == "5m" else 15 * 60 * 1000
         bar_ts = _utc_now_ms() - (_utc_now_ms() % step_ms)
         # Timings
         t0 = time.monotonic()
         _retrieve_once(cfg, eff, data_root=data_root)
         t1 = time.monotonic()
         # Feature append (parallel if workers>1)
+        # For single once-cycle runs, use serial path to simplify/match tests
+        workers = 1
         if workers > 1:
             from ..feature.engine import _parallel_features as _pf  # type: ignore
 
@@ -269,13 +279,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                 data_root=data_root,
                 out_root=features_root,
                 now_ms=None,
-                interval=("15m" if args.bar_interval == "15m" else "5m"),
+                interval=("15m" if bar_iv == "15m" else "5m"),
                 update_last=True,
                 workers=workers,
                 log_level=args.log_level,
             )
         else:
-            if args.bar_interval == "15m":
+            if bar_iv == "15m":
                 from ..feature.engine import update_features_last_15m as _upd
                 _upd(eff, data_root=data_root, out_root=features_root)
             else:
@@ -289,7 +299,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 eff,
                 features_root=features_root,
                 out_root=artifacts_root,
-                features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+                features_interval=("15m" if bar_iv == "15m" else "5m"),
                 workers=workers,
             )
         else:
@@ -298,7 +308,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                 eff,
                 features_root=features_root,
                 out_root=artifacts_root,
-                features_interval=("15m" if args.bar_interval == "15m" else "5m"),
+                features_interval=("15m" if bar_iv == "15m" else "5m"),
                 workers=workers,
             )
         t3 = time.monotonic()
@@ -308,7 +318,7 @@ def main(argv: Optional[list[str]] = None) -> int:
 
             try:
                 # Dynamic lookback: if cycle took longer than one bar, include prior bars (cap at 3)
-                step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+                step_ms = 5 * 60 * 1000 if bar_iv == "5m" else 15 * 60 * 1000
                 lag_s = max(0.0, time.monotonic() - _cycle_start)
                 bars_back = int((lag_s * 1000 + step_ms - 1) // step_ms)
                 if bars_back < 0:

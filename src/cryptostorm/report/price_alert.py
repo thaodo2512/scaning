@@ -121,9 +121,10 @@ def _render_html(symbol: str, price: List[Dict[str, Any]], alerts: List[Dict[str
                 hz_str = ""
             if hz_str:
                 pills.append(f"<span class=\"pill\">horizons={hz_str}</span>")
-        for key in ("storm_count", "true_positive"):
+        labels = {"storm_count": "storms", "true_positive": "true positive"}
+        for key, lbl in labels.items():
             if eval_info.get(key) is not None:
-                pills.append(f"<span class=\"pill\">{key.replace('_',' ')}={eval_info.get(key)}</span>")
+                pills.append(f"<span class=\"pill\">{lbl}={eval_info.get(key)}</span>")
         if eval_info.get("precision") is not None:
             try:
                 pills.append(f"<span class=\"pill\">precision={float(eval_info.get('precision')):.3f}</span>")

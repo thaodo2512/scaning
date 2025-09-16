@@ -319,8 +319,9 @@ def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Pa
     for sym in eff.symbols:
         data_dir = data_root / sym
         price = _extract_price(data_dir)
-        oi = []
-        liq = []
+        # Extract OI and Liq series for downstream consumers/tests, even if not charted
+        oi = _extract_oi(data_dir)
+        liq = _extract_liq(data_dir)
         scores_fp = artifacts_root / "scores" / f"{sym}.csv"
         alerts_fp = artifacts_root / "alerts" / f"{sym}.csv"
         sc = _read_scores(scores_fp)

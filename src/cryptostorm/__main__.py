@@ -110,7 +110,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--build-reports", action="store_true")
     p_rt.add_argument("--reports", type=str, default="reports")
     p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
-    p_rt.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
+    p_rt.add_argument("--bar-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
     p_rt.add_argument("--workers", type=int, default=0)
     p_rt.add_argument("--coinglass-rps", type=float, default=4.1667)
     p_rt.add_argument("--reload-config", action="store_true")
