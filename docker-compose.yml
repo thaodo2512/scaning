@@ -70,3 +70,15 @@ services:
       - ./:/app
     command: ["bash", "-lc", "scripts/run_pipeline.sh -c configs/top.yaml -t 100"]
     # One-shot job that exits; run with: docker compose run --rm pipeline
+  janitor:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+      - RETENTION_DAYS=${RETENTION_DAYS:-180}
+      - JANITOR_INTERVAL=${JANITOR_INTERVAL:-86400}
+    volumes:
+      - ./:/app
+    # Simple daily loop to compact data/features and optional artifacts
+    command: ["bash", "-lc", "while true; do echo [janitor] compacting to ${RETENTION_DAYS}d; python scripts/compact_data.py --keep-days ${RETENTION_DAYS} --data data --features features --prune-artifacts --artifacts artifacts/top_realtime --verbose || true; sleep ${JANITOR_INTERVAL}; done"]
+    restart: unless-stopped
