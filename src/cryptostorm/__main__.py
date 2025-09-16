@@ -113,6 +113,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
     p_rt.add_argument("--workers", type=int, default=0)
     p_rt.add_argument("--coinglass-rps", type=float, default=4.1667)
+    p_rt.add_argument("--reload-config", action="store_true")
 
     p_api = sub.add_parser("api", help="Run FastAPI server for realtime scores/alerts")
     p_api.add_argument("config", type=str)
@@ -310,6 +311,8 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--coinglass-rps", str(float(args.coinglass_rps))]
         if int(getattr(args, "workers", 0) or 0) > 0:
             argv += ["--workers", str(int(args.workers))]
+        if bool(getattr(args, "reload_config", False)):
+            argv += ["--reload-config"]
         return realtime_main(argv)
 
     if args.cmd == "api":

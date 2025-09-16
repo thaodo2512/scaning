@@ -144,6 +144,27 @@ while true; do
   echo "[trainer] $(date -u +%F\ %T) acquiring training lock at $LOCK_FILE"
   mkdir -p "$LOCK_DIR"
   date -u +%F\ %T >"$LOCK_FILE" || true
+  # Optionally refresh universe.symbols before retrain (default on)
+  if [[ "${TRAINER_REFRESH_SYMBOLS:-1}" == "1" ]]; then
+    TOP_N=$(python - <<'PY' "$CONFIG" || echo 100)
+import json,sys
+from pathlib import Path
+try:
+  p=Path(sys.argv[1])
+  txt=p.read_text(encoding='utf-8')
+  if p.suffix.lower() in {'.yaml','.yml'}:
+    import yaml
+    cfg=yaml.safe_load(txt) or {}
+  else:
+    cfg=json.loads(txt)
+  syms=(cfg.get('universe') or {}).get('symbols') or []
+  print(len(syms) if isinstance(syms,list) else 100)
+except Exception:
+  print(100)
+PY
+    echo "[trainer] refreshing symbols (top=$TOP_N)"
+    python -m cryptostorm binance-top --top "$TOP_N" --out "$CONFIG" --print || true
+  fi
   # Snapshot current thresholds before retrain (best-effort)
   python - "$ARTIFACTS_DIR" <<'PY' || true
 import json,sys,glob,os

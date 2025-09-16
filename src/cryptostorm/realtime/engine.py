@@ -181,22 +181,31 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--bar-interval", type=str, choices=["5m", "15m"], default="15m")
     parser.add_argument("--workers", type=int, default=0, help="Per-symbol parallel workers for features/backtest (0=auto)")
     parser.add_argument("--coinglass-rps", type=float, default=4.1667, help="Global Coinglass request rate (req/s), capped to ~250/min")
+    parser.add_argument("--reload-config", action="store_true", help="Reload config each cycle if the file changes (universe/tuning updates)")
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    cfg = load_config(args.config)
+    cfg_path = Path(args.config)
+    cfg = load_config(cfg_path)
     eff, warns, errs = validate_config(cfg, require_env=True)
     if errs:
         for e in errs:
             logging.getLogger("cryptostorm").error(e)
         return 2
     # attach original path for downstream convenience (telegram)
-    cfg["_path"] = args.config  # type: ignore[index]
+    cfg["_path"] = str(cfg_path)  # type: ignore[index]
 
     data_root = Path(args.data)
     features_root = Path(args.features)
     artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
+
+    # Track config mtime for reloads
+    cfg_mtime = None
+    try:
+        cfg_mtime = cfg_path.stat().st_mtime
+    except Exception:
+        cfg_mtime = None
 
     # Helper: check training lock to avoid races with trainer
     def _training_locked() -> bool:
@@ -226,6 +235,20 @@ def main(argv: Optional[list[str]] = None) -> int:
         pass
 
     if args.once:
+        # Optional reload before single cycle
+        if args.reload_config:
+            try:
+                mt = cfg_path.stat().st_mtime
+                if cfg_mtime is None or mt > float(cfg_mtime):
+                    cfg = load_config(cfg_path)
+                    eff, warns, errs = validate_config(cfg, require_env=True)
+                    if not errs:
+                        cfg["_path"] = str(cfg_path)  # type: ignore[index]
+                        artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
+                        cfg_mtime = mt
+                        logging.getLogger("cryptostorm.realtime").info("config reloaded before cycle (once mode)")
+            except Exception:
+                pass
         # Respect training lock: skip this cycle to avoid conflicts
         if _training_locked():
             logging.getLogger("cryptostorm.realtime").info("training lock present; skipping realtime cycle")
@@ -367,6 +390,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     LOG = logging.getLogger("cryptostorm.realtime")
     LOG.info("Realtime loop started: offset=%.1fs jitter≤%.1fs", args.poll_offset_s, args.jitter_s)
     while True:
+        # Reload config if file changed
+        if args.reload_config:
+            try:
+                mt = cfg_path.stat().st_mtime
+                if cfg_mtime is None or mt > float(cfg_mtime):
+                    cfg = load_config(cfg_path)
+                    _eff, warns, errs = validate_config(cfg, require_env=True)
+                    if not errs:
+                        eff = _eff
+                        cfg["_path"] = str(cfg_path)  # type: ignore[index]
+                        artifacts_root = _resolve_artifacts_root(cfg, eff, args.artifacts)
+                        cfg_mtime = mt
+                        logging.getLogger("cryptostorm.realtime").info("config reloaded (universe/tuning updates applied)")
+            except Exception:
+                pass
         # If trainer is running, pause this cycle
         if _training_locked():
             logging.getLogger("cryptostorm.realtime").info("training lock present; sleeping until next bar")
