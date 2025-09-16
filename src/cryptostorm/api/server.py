@@ -72,10 +72,18 @@ def _build_app(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path,
         from fastapi import FastAPI, HTTPException, Depends
         from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
         from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+        from fastapi.staticfiles import StaticFiles
     except Exception as exc:  # pragma: no cover
         raise RuntimeError("FastAPI is required: pip install fastapi uvicorn") from exc
 
     app = FastAPI(title="CryptoStorm API", version="0.1")
+
+    # Serve the reports directory under /reports for convenience, e.g.
+    #   GET /reports/BTCUSDT_price_alert.html
+    try:
+        app.mount("/reports", StaticFiles(directory=str(reports_root)), name="reports")
+    except Exception:
+        pass
 
     def _auth_dep() -> None:
         if not api_token:
