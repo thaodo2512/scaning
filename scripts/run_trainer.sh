@@ -121,6 +121,52 @@ ARTIFACTS_DIR=$(resolve_artifacts_root)
 LOCK_DIR="$ARTIFACTS_DIR/.locks"
 LOCK_FILE="$LOCK_DIR/retraining.lock"
 
+# Auto-merge tuned threshold overlay into config if present
+merge_threshold_overlay() {
+  local cfg="$1"
+  # Default overlay location produced by scripts/tune_thresholds.py
+  local overlay="artifacts/tuning/overlay_thresholds.yaml"
+  if [[ -n "${CRYPTOSTORM_TUNING_OVERLAY:-}" ]]; then
+    overlay="${CRYPTOSTORM_TUNING_OVERLAY}"
+  fi
+  if [[ ! -f "$overlay" ]]; then
+    return
+  fi
+  echo "[trainer] merging tuned thresholds overlay -> $cfg ($overlay)"
+  python - "$cfg" "$overlay" <<'PY' || true
+import sys, json
+from pathlib import Path
+cfgp, ovp = Path(sys.argv[1]), Path(sys.argv[2])
+try:
+  txt = cfgp.read_text(encoding='utf-8')
+  if cfgp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    cfg = yaml.safe_load(txt) or {}
+  else:
+    cfg = json.loads(txt)
+  ovtxt = ovp.read_text(encoding='utf-8')
+  if ovp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    overlay = yaml.safe_load(ovtxt) or {}
+  else:
+    overlay = json.loads(ovtxt)
+  tgt = (cfg.setdefault('model', {})
+             .setdefault('threshold_q_per_symbol', {}))
+  src = (overlay.get('model') or {}).get('threshold_q_per_symbol') or {}
+  if isinstance(src, dict):
+    tgt.update(src)
+  # Write back, preserving YAML when possible
+  if cfgp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    cfgp.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding='utf-8')
+  else:
+    cfgp.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+  print(f"merged {len(src)} symbol thresholds")
+except Exception as e:
+  print(f"merge overlay failed: {e}")
+PY
+}
+
 notify_telegram() {
   local text="$1"
   local token="${TELEGRAM_BOT_TOKEN:-}"
@@ -147,7 +193,7 @@ while true; do
   # Optionally refresh universe.symbols before retrain (default on)
   if [[ "${TRAINER_REFRESH_SYMBOLS:-1}" == "1" ]]; then
     # Snapshot symbols before refresh
-    python - "$CONFIG" <<'PY' || true
+    python - "$CONFIG" "$LOCK_DIR" <<'PY' || true
 import json,sys
 from pathlib import Path
 try:
@@ -159,7 +205,7 @@ try:
     cfg=json.loads(txt)
   syms=list((cfg.get('universe') or {}).get('symbols') or [])
   out={'symbols': syms}
-  lockdir=Path("$LOCK_DIR"); lockdir.mkdir(parents=True, exist_ok=True)
+  lockdir=Path(sys.argv[2]); lockdir.mkdir(parents=True, exist_ok=True)
   (lockdir/ 'symbols_before.json').write_text(json.dumps(out, separators=(',',':')), encoding='utf-8')
 except Exception:
   pass
@@ -238,6 +284,8 @@ lockdir=art/'.locks'
 lockdir.mkdir(parents=True, exist_ok=True)
 (lockdir/'thresholds_before.json').write_text(json.dumps(m, separators=(',',':')), encoding='utf-8')
 PY
+  # Apply tuned thresholds overlay (if available)
+  merge_threshold_overlay "$CONFIG"
   echo "[trainer] $(date -u +%F\ %T) running backtest (train)"
   TRAIN_START=$(date -u +%s)
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
