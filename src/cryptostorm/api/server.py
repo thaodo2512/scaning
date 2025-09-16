@@ -140,6 +140,20 @@ def _build_app(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Path,
             raise HTTPException(status_code=404, detail="report not found")
         return HTMLResponse(fp.read_text(encoding="utf-8"))
 
+    @app.get("/price/{symbol}")
+    def report_price(symbol: str):
+        fp = reports_root / f"{symbol}_price_alert.html"
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail="price report not found")
+        return HTMLResponse(fp.read_text(encoding="utf-8"))
+
+    @app.get("/plotly/{symbol}")
+    def report_plotly(symbol: str):
+        fp = reports_root / f"{symbol}_plotly.html"
+        if not fp.exists():
+            raise HTTPException(status_code=404, detail="plotly report not found")
+        return HTMLResponse(fp.read_text(encoding="utf-8"))
+
     @app.get("/metrics")
     def metrics(prom: bool = False):
         slo_fp = artifacts_root / "metrics" / "realtime.jsonl"
