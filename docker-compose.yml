@@ -12,6 +12,8 @@ services:
   realtime:
     build: .
     image: cryptostorm:latest
+    depends_on:
+      - janitor
     environment:
       - PYTHONPATH=/app/src
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
@@ -25,6 +27,8 @@ services:
   trainer:
     build: .
     image: cryptostorm:latest
+    depends_on:
+      - janitor
     environment:
       - PYTHONPATH=/app/src
       - COINGLASS_API_KEY=${COINGLASS_API_KEY}
