@@ -72,8 +72,8 @@ services:
       - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_pipeline.sh -c configs/top.yaml -t 100"]
-    # One-shot job that exits; run with: docker compose run --rm pipeline
+    command: ["bash", "-lc", "scripts/run_pipeline.sh -c configs/top.yaml -t 200"]
+    # One‑shot job that exits; run with: docker compose run --rm pipeline
   janitor:
     build: .
     image: cryptostorm:latest

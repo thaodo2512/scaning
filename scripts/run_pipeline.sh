@@ -24,7 +24,7 @@ USAGE
 }
 
 CONFIG="configs/top.yaml"
-TOP=100
+TOP=200
 DO_UPDATE=1
 DO_BACKFILL=1
 DO_TUNE=1
@@ -75,4 +75,3 @@ else
 fi
 
 echo "Done. To start services:  docker compose up -d realtime trainer api"
-
