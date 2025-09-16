@@ -29,6 +29,7 @@ Options:
       --monitor              Launch console monitor after realtime step
       --monitor-view <v>     Monitor view: data|alerts (default: alerts)
       --monitor-symbols <n>  Symbols to show in monitor (default: 20)
+      --reload-config        Reload config each cycle if the file changed (universe/tuning updates)
 
 Env:
   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID (for --send-telegram)
@@ -61,6 +62,7 @@ MONITOR="0"
 MONITOR_VIEW="alerts"
 MONITOR_SYMBOLS="20"
 WORKERS_AUTO=""
+RELOAD_CFG="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -86,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     --monitor) MONITOR="1"; shift;;
     --monitor-view) MONITOR_VIEW="$2"; shift 2;;
     --monitor-symbols) MONITOR_SYMBOLS="$2"; shift 2;;
+    --reload-config) RELOAD_CFG="1"; shift;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -140,6 +143,7 @@ if [[ "$ONCE" == "1" ]]; then RT_ARGS+=(--once); fi
 if [[ "$ONLINE" == "1" ]]; then RT_ARGS+=(--online-scoring); fi
 if [[ "$SEND_TG" == "1" ]]; then RT_ARGS+=(--send-telegram --telegram-kinds "$TG_KINDS"); fi
 if [[ "$BUILD_REPORTS" == "1" ]]; then RT_ARGS+=(--build-reports --reports "$REPORTS_DIR" --report-engine "$REPORT_ENGINE"); fi
+if [[ "$RELOAD_CFG" == "1" ]]; then RT_ARGS+=(--reload-config); fi
 python -m cryptostorm realtime "${RT_ARGS[@]}"
 
 if [[ "$ONCE" == "1" ]]; then

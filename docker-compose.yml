@@ -19,7 +19,7 @@ services:
       - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
     volumes:
       - ./:/app
-    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --online --watch --poll-offset-s 15 --jitter-s 2 --build-reports --report-engine price --send-telegram --telegram-kinds storm,pre_alert"]
+    command: ["bash", "-lc", "scripts/run_realtime.sh -c configs/top.yaml --online --watch --poll-offset-s 15 --jitter-s 2 --build-reports --report-engine price --send-telegram --telegram-kinds storm,pre_alert --reload-config"]
     restart: unless-stopped
 
   trainer:
