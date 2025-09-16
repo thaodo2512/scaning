@@ -120,7 +120,7 @@ def _compact_csv_by_ts(fp: Path, cutoff_ms: int, *, verbose: bool = False) -> Tu
 
 def main(argv: Optional[List[str]] = None) -> int:
     p = argparse.ArgumentParser(description="Compact data/features/artifacts to last N days by ts")
-    p.add_argument("--keep-days", type=int, default=180)
+    p.add_argument("--keep-days", type=int, default=45)
     p.add_argument("--data", type=str, default="data")
     p.add_argument("--features", type=str, default="features")
     p.add_argument("--artifacts", type=str, default="", help="Optional artifacts run dir to prune (scores/alerts)")
@@ -173,4 +173,3 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-

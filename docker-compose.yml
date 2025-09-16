@@ -79,7 +79,7 @@ services:
     image: cryptostorm:latest
     environment:
       - PYTHONPATH=/app/src
-      - RETENTION_DAYS=${RETENTION_DAYS:-180}
+      - RETENTION_DAYS=${RETENTION_DAYS:-45}
       - JANITOR_INTERVAL=${JANITOR_INTERVAL:-86400}
     volumes:
       - ./:/app
