@@ -235,6 +235,54 @@ except Exception:
 PY
     echo "[trainer] refreshing symbols (top=$TOP_N)"
     python -m cryptostorm binance-top --top "$TOP_N" --out "$CONFIG" --print || true
+    # Guard: ensure refreshed list still has TOP_N symbols when possible.
+    # If the refresh produced fewer than TOP_N but the previous list had TOP_N,
+    # restore the previous list to keep the target universe size stable.
+    python - <<'PY' "$CONFIG" "$LOCK_DIR" "$TOP_N" || true
+import json, sys
+from pathlib import Path
+cfgp, lockdir, top_str = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
+try:
+    top_n = int(top_str)
+except Exception:
+    top_n = 0
+try:
+    txt = cfgp.read_text(encoding='utf-8')
+    if cfgp.suffix.lower() in {'.yaml','.yml'}:
+        import yaml  # type: ignore
+        cfg = yaml.safe_load(txt) or {}
+    else:
+        cfg = json.loads(txt)
+    uni = cfg.get('universe') or {}
+    new_syms = list(uni.get('symbols') or [])
+except Exception:
+    new_syms = []
+before_syms = []
+try:
+    obj = json.loads((lockdir/'symbols_before.json').read_text(encoding='utf-8'))
+    before_syms = list(obj.get('symbols') or [])
+except Exception:
+    before_syms = []
+# Restore only when previous had target size and new has fewer than target
+if top_n > 0 and len(new_syms) < top_n and len(before_syms) == top_n:
+    try:
+        if cfgp.suffix.lower() in {'.yaml','.yml'}:
+            import yaml  # type: ignore
+            cfg = yaml.safe_load(cfgp.read_text(encoding='utf-8')) or {}
+            uni = cfg.setdefault('universe', {})
+            uni['symbols'] = before_syms
+            cfgp.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding='utf-8')
+        else:
+            cfg = json.loads(cfgp.read_text(encoding='utf-8'))
+            cfg.setdefault('universe', {})['symbols'] = before_syms
+            cfgp.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+        print(f"[trainer] refresh produced {len(new_syms)}< {top_n}; restored previous {len(before_syms)} symbols")
+    except Exception as e:
+        print(f"[trainer] failed to restore previous symbols: {e}")
+else:
+    # Log current size for visibility
+    print(f"[trainer] refresh size now {len(new_syms)} (target {top_n})")
+PY
     # Compute symbol delta and write metrics
     python - <<'PY' "$CONFIG" "$ARTIFACTS_DIR" || true
 import json,sys,datetime as dt
