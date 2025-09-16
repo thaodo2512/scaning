@@ -1,0 +1,14 @@
+services:
+  backfill:
+    platform: "linux/amd64"
+  realtime:
+    platform: "linux/amd64"
+  trainer:
+    platform: "linux/amd64"
+  api:
+    platform: "linux/amd64"
+  monitor:
+    platform: "linux/amd64"
+  pipeline:
+    platform: "linux/amd64"
+
