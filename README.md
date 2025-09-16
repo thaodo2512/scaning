@@ -172,9 +172,7 @@
   - Ranks by `(−vol30d_quote, −vol24h_quote, symbol)` and writes exactly `--top` symbols.
   - `--data` defaults to `data` (change if your data root differs). `--rps` only applies when falling back to Binance.
 
-- AI‑assisted ranking (optional):
-  - `OPENAI_API_KEY=... PYTHONPATH=src python -m cryptostorm binance-top --top 100 --ai --openai-model gpt-4o-mini --data data --out configs/realtime.yaml --print`
-  - The tool builds the objective metrics from local data when available and asks the model to pick the “most interesting” set from the candidate pool. If the AI call fails or is unavailable, it falls back to the deterministic volume ranking.
+  - AI ranking removed: the tool now uses a simple deterministic volume-based ranking only.
 
 ## Console Monitor (TUI)
 - Text dashboard to monitor freshness and SLOs:

@@ -292,96 +292,7 @@ def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = Fals
     return rows[: max(1, int(top))]
 
 
-def _openai_chat_rank(candidates: List[RankRow], top: int, *, model: str, api_key: str, verbose: bool = False) -> List[str]:
-    # Prepare a compact JSON for the model (limit to 150 candidates to keep prompt size reasonable)
-    k = min(len(candidates), 150)
-    objs = [
-        {
-            "symbol": r.symbol,
-            "vol30d_quote": round(float(r.vol30d_quote), 3),
-            "vol24h_quote": round(float(r.vol24h_quote), 3),
-            "ret30d": round(float(r.ret30d), 6),
-            "rv30d": round(float(r.rv30d), 6),
-        }
-        for r in candidates[:k]
-    ]
-    sys = (
-        "You are a crypto market assistant. Given candidate USDT perpetual futures symbols "
-        "with metrics (30d/24h quote volume, 30d return, 30d realized volatility), select the most interesting top symbols "
-        "for systematic intraday research this month. Favor high liquidity (volumes), healthy volatility (rv), and avoid extremely illiquid pairs."
-    )
-    user = {
-        "task": "Select top symbols",
-        "criteria": [
-            "High 30d quote volume (primary)",
-            "High 30d realized volatility (secondary)",
-            "Diverse sectors if ties",
-        ],
-        "top": int(top),
-        "candidates": objs,
-        "output": "Return a JSON object with {symbols:[...]} with exactly 'top' symbols from candidates, in ranked order.",
-    }
-    import urllib.request
-    import urllib.error
-    import json as _json
-    import time as _t
-    import os as _os
-
-    try:
-        if verbose:
-            print(
-                f"[binance-top] Calling OpenAI model={model} for AI ranking on {len(objs)} candidates (top={top})…",
-                flush=True,
-            )
-        body = _json.dumps({
-            "model": model,
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": sys},
-                {"role": "user", "content": _json.dumps(user)},
-            ],
-            "response_format": {"type": "json_object"},
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/chat/completions",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-        )
-        t0 = _t.monotonic()
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read()
-            elapsed_ms = int((_t.monotonic() - t0) * 1000)
-            try:
-                data = _json.loads(raw.decode("utf-8", errors="replace"))
-            except Exception:
-                data = {}
-        if verbose:
-            print(f"[binance-top] AI HTTP ok in {elapsed_ms} ms", flush=True)
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "{}")
-        if (_os.getenv("CRYPTOSTORM_AI_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}) and verbose:
-            try:
-                snippet = content if len(content) <= 400 else (content[:400] + " … (truncated)")
-                print(f"[binance-top] AI raw content: {snippet}", flush=True)
-            except Exception:
-                pass
-        parsed = _json.loads(content)
-        out = [s for s in (parsed.get("symbols") or []) if isinstance(s, str)]
-        # validate subset
-        allow = {r.symbol for r in candidates}
-        out = [s for s in out if s in allow]
-        if verbose:
-            print(f"[binance-top] AI selected {len(out)} symbols.", flush=True)
-        return out[: max(1, int(top))]
-    except Exception as e:
-        if verbose:
-            try:
-                print(f"[binance-top] AI call failed: {e}", flush=True)
-            except Exception:
-                pass
-        return []
+# AI ranking removed; deterministic ranking only
 
 
 def _update_config_symbols(path: Path, symbols: Sequence[str]) -> None:
@@ -404,32 +315,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--rps", type=float, default=5.0, help="Binance API requests per second pacing (only used if no local data)")
     parser.add_argument("--out", type=str, help="Path to YAML config to write (updates universe.symbols)")
     parser.add_argument("--print", action="store_true", help="Print the symbol list to stdout")
-    parser.add_argument("--ai", action="store_true", help="Use OpenAI to rank the candidates (requires OPENAI_API_KEY)")
-    parser.add_argument("--openai-model", type=str, default="gpt-4o-mini", help="OpenAI chat model for ranking")
+    # AI ranking removed
     args = parser.parse_args(argv)
 
     # Build simple deterministic ranking (prefer local Coinglass data)
     data_root = Path(args.data) if args.data else None
-    rows = select_top_binance_perps(args.top * (2 if args.ai else 1), rps=args.rps, verbose=True, data_root=data_root)
-
-    # Optional AI refinement over a bounded pool
-    if args.ai and rows:
-        api_key = os.getenv("OPENAI_API_KEY") or ""
-        if not api_key:
-            print("[binance-top] AI enabled but OPENAI_API_KEY not set; skipping AI ranking.", flush=True)
-        ai_syms: List[str] = []
-        if api_key:
-            ai_syms = _openai_chat_rank(rows, args.top, model=args.openai_model, api_key=api_key, verbose=True)
-        if ai_syms:
-            # Reorder rows according to AI selection
-            order = {s: i for i, s in enumerate(ai_syms)}
-            rows = [r for r in rows if r.symbol in order]
-            rows.sort(key=lambda r: order[r.symbol])
-        else:
-            if api_key:
-                print("[binance-top] AI returned no selection; using deterministic order.", flush=True)
-
-    syms = [r.symbol for r in rows[: args.top]]
+    rows = select_top_binance_perps(args.top, rps=args.rps, verbose=True, data_root=data_root)
+    syms = [r.symbol for r in rows]
 
     print(f"[binance-top] Selected {len(syms)} symbols.", flush=True)
     if args.out:

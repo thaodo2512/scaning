@@ -154,7 +154,7 @@ Updated behaviors (2025‑09‑13):
   - Data-first: enumerate symbols from `data/<SYM>/` having `futures_ohlcv_{15m|5m}.jsonl` and compute `vol30d_quote` and `vol24h_quote` by summing `payload.volume_usd` over the last 30 days / 24h. This avoids live Binance calls and remains reproducible.
   - Fallback: if no local data exists, fetch from Binance (`exchangeInfo` + 1d klines + 24h ticker) to compute the same metrics.
   - Rank: sort by (−vol30d_quote, −vol24h_quote, symbol); return exactly `--top`.
-  - Optional AI: `--ai --openai-model` can reorder the top pool; strict subset with fallback.
+  - AI option removed; selection is deterministic by volume.
 
 - Troubleshooting
   - Report shows price only: likely no alerts yet or artifacts missing. Seed models, let realtime run multiple cycles, or lower `model.threshold_q` and set `alerts.persist_k_bars: 1`, `storm_confirm_k_bars.default: 1` for a demo; re‑seed models, then run realtime.

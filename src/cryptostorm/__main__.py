@@ -156,8 +156,6 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_uni.add_argument("--rps", type=float, default=5.0)
     p_uni.add_argument("--out", type=str, help="Path to YAML config to write/update")
     p_uni.add_argument("--print", action="store_true")
-    p_uni.add_argument("--ai", action="store_true", help="Use OpenAI to rank candidates (requires OPENAI_API_KEY)")
-    p_uni.add_argument("--openai-model", type=str, default="gpt-4o-mini")
 
     # Alerts utilities
     p_merge = sub.add_parser("alerts-merge", help="Merge all per-symbol alerts into a single CSV")
@@ -377,8 +375,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--out", args.out]
         if args.print:
             argv += ["--print"]
-        if args.ai:
-            argv += ["--ai", "--openai-model", args.openai_model]
         return binance_universe_main(argv)
 
     return 0
