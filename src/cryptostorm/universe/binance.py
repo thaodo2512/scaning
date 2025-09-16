@@ -55,6 +55,28 @@ def _futures_usdt_perp_symbols(verbose: bool = False) -> List[str]:
     return sorted(out)
 
 
+def _symbol_to_base_map(verbose: bool = False) -> Dict[str, str]:
+    """Return {symbol: baseAsset} for USDT‑M PERPETUAL trading pairs from exchangeInfo."""
+    if verbose:
+        print("[binance-top] Fetching Binance exchange info for base assets…", flush=True)
+    data = _http_get(f"{BINANCE_FAPI}/fapi/v1/exchangeInfo")
+    m: Dict[str, str] = {}
+    for s in (data.get("symbols") or []):  # type: ignore[union-attr]
+        try:
+            if (
+                s.get("status") == "TRADING"
+                and s.get("quoteAsset") == "USDT"
+                and s.get("contractType") == "PERPETUAL"
+            ):
+                sym = s.get("symbol")
+                base = s.get("baseAsset")
+                if isinstance(sym, str) and isinstance(base, str):
+                    m[str(sym)] = str(base)
+        except Exception:
+            continue
+    return m
+
+
 @dataclass
 class RankRow:
     symbol: str
@@ -295,7 +317,7 @@ def select_top_binance_perps(top: int, *, rps: float = 5.0, verbose: bool = Fals
 # AI ranking removed; deterministic ranking only
 
 
-def _update_config_symbols(path: Path, symbols: Sequence[str]) -> None:
+def _update_config_symbols_and_mapping(path: Path, symbols: Sequence[str], sym_to_base: Mapping[str, str]) -> None:
     # Load and write YAML; avoid adding dependency by expecting PyYAML already installed in project
     import yaml  # type: ignore
 
@@ -305,6 +327,21 @@ def _update_config_symbols(path: Path, symbols: Sequence[str]) -> None:
     if "universe" not in cfg or not isinstance(cfg["universe"], dict):
         cfg["universe"] = {}
     cfg["universe"]["symbols"] = list(symbols)
+    # Update conventions.symbol_to_coin mapping for selected symbols
+    conv = cfg.get("conventions") or {}
+    if not isinstance(conv, dict):
+        conv = {}
+    sym_map = conv.get("symbol_to_coin") or {}
+    if not isinstance(sym_map, dict):
+        sym_map = {}
+    for sym in symbols:
+        base = sym_to_base.get(sym) or (sym[:-4] if sym.endswith("USDT") else sym)
+        try:
+            sym_map[str(sym)] = str(base)
+        except Exception:
+            pass
+    conv["symbol_to_coin"] = sym_map
+    cfg["conventions"] = conv
     path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
 
 
@@ -325,7 +362,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     print(f"[binance-top] Selected {len(syms)} symbols.", flush=True)
     if args.out:
-        _update_config_symbols(Path(args.out), syms)
+        # Build base map (fallback to strip 'USDT' if not found)
+        base_map = _symbol_to_base_map(verbose=True)
+        _update_config_symbols_and_mapping(Path(args.out), syms, base_map)
         print(f"[binance-top] Updated {args.out} with {len(syms)} symbols", flush=True)
     if args.print or not args.out:
         print(json.dumps({"symbols": syms}, indent=2))

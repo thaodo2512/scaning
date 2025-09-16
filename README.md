@@ -270,3 +270,8 @@ Notes:
   - `python scripts/binance_perp_usdt_dataset.py --days 30 --concurrency 8 --outfile dataset_usdtm_perps.csv`
 - Outputs columns: symbol, base/quote assets, onboarding date, precision/filters, 30d volumes (base/quote), avg_daily_quote, vol24h_quote, liquidity momentum (vol24/avg_daily), 30d trades, tradeCount24h, realized vol (daily and annualized).
   - Keep concurrency modest (6–12) to avoid 418/429 bans by Binance.
+### One-shot Pipeline via Compose
+- Run a simple pipeline (update symbols → backfill → tuning) as a one-off job:
+  - `docker compose run --rm pipeline`
+- After it finishes, bring up long-running services:
+  - `docker compose up -d realtime trainer api`

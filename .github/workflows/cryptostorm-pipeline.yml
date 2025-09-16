@@ -7,6 +7,15 @@ on:
         description: Path to config file
         required: true
         default: configs/top.yaml
+      update_symbols:
+        description: Update universe.symbols via binance-top before backfill
+        required: false
+        type: boolean
+        default: true
+      top_symbols:
+        description: How many symbols to select (binance-top)
+        required: true
+        default: '100'
       q_grid:
         description: Quantile grid for tuning (comma-separated)
         required: true
@@ -38,6 +47,12 @@ jobs:
 
       - name: Build compose images
         run: docker compose build
+
+      - name: Update universe symbols (binance-top)
+        if: inputs.update_symbols == 'true'
+        run: |
+          docker compose run --rm backfill \
+            python -m cryptostorm binance-top --top ${{ inputs.top_symbols }} --out "${{ inputs.config_path }}" --print
 
       - name: Validate config (no env required)
         run: |
@@ -89,4 +104,3 @@ jobs:
       #     TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       #   run: |
       #     docker compose up -d realtime trainer api
-

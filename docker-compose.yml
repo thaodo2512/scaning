@@ -58,3 +58,15 @@ services:
     command: ["python", "-m", "cryptostorm", "monitor", "configs/top.yaml", "--data", "data", "--features", "features", "--symbols", "20", "--view", "alerts"]
     stdin_open: true
     tty: true
+  pipeline:
+    build: .
+    image: cryptostorm:latest
+    environment:
+      - PYTHONPATH=/app/src
+      - COINGLASS_API_KEY=${COINGLASS_API_KEY}
+      - TELEGRAM_BOT_TOKEN_FILE=/app/secrets/telegram_bot_token.txt
+      - TELEGRAM_CHAT_ID_FILE=/app/secrets/telegram_chat_id.txt
+    volumes:
+      - ./:/app
+    command: ["bash", "-lc", "scripts/run_pipeline.sh -c configs/top.yaml -t 100"]
+    # One-shot job that exits; run with: docker compose run --rm pipeline
