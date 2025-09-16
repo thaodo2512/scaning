@@ -5,3 +5,5 @@ scikit-learn>=1.5.0
 plotly>=5.22.0
 pyarrow>=16.1.0
 
+# For scripts/binance_perp_usdt_dataset.py (concurrent HTTP)
+aiohttp>=3.9.0

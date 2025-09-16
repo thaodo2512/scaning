@@ -165,12 +165,8 @@
 ## Auto‑select Top Binance Symbols
 - Populate `universe.symbols` with the top USDT‑perp contracts by quote volume (simple, deterministic):
   - `PYTHONPATH=src python -m cryptostorm binance-top --top 100 --data data --out configs/realtime.yaml --print`
-  - Prefers local Coinglass data under `data/<SYM>/futures_ohlcv_{15m|5m}.jsonl` to compute:
-    - `vol30d_quote` (sum of `payload.volume_usd` over last 30 days)
-    - `vol24h_quote` (sum over last 24h)
-  - If no local data is found, it falls back to the Binance Futures listing (`/fapi/v1/exchangeInfo`) and fetches per‑symbol 1d klines + 24h ticker to compute the same metrics.
+  - Prefers local Coinglass data under `data/<SYM>/futures_ohlcv_{15m|5m}.jsonl`; otherwise falls back to Binance.
   - Ranks by `(−vol30d_quote, −vol24h_quote, symbol)` and writes exactly `--top` symbols.
-  - `--data` defaults to `data` (change if your data root differs). `--rps` only applies when falling back to Binance.
 
   - AI ranking removed: the tool now uses a simple deterministic volume-based ranking only.
 
@@ -268,3 +264,9 @@ Notes:
 - Features build (full backfill): orderbook processing is optimized to read snapshots once per symbol (previously O(N) file scans per bar). Still, building 30 days for many symbols is heavy; consider doing it once, then using `--online` scoring.
 - Backtest training cost: reduce `model.retrain_every_hours` (e.g., 12) and/or `per_tier_overrides.*.n_estimators` for large universes. `n_jobs: -1` already enables parallel trees.
 - Realtime scoring: prefer `realtime --online-scoring` with pre-seeded artifacts to avoid retraining each cycle.
+## Binance USDT‑M Perps Dataset (CSV)
+- Build a reviewable dataset of trading pairs and metrics (30d daily klines + 24h stats):
+  - `pip install aiohttp`
+  - `python scripts/binance_perp_usdt_dataset.py --days 30 --concurrency 8 --outfile dataset_usdtm_perps.csv`
+- Outputs columns: symbol, base/quote assets, onboarding date, precision/filters, 30d volumes (base/quote), avg_daily_quote, vol24h_quote, liquidity momentum (vol24/avg_daily), 30d trades, tradeCount24h, realized vol (daily and annualized).
+  - Keep concurrency modest (6–12) to avoid 418/429 bans by Binance.
