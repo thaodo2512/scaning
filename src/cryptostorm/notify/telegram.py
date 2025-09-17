@@ -176,6 +176,15 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     run_id = (cfg.get("run") or {}).get("run_id") or eff.run_id
     artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
+    # Convenience fallback: if no --artifacts was provided and the computed
+    # run_id path does not exist, but artifacts/top_realtime exists, use it.
+    if not args.artifacts and not artifacts_root.exists():
+        fb = Path("./artifacts/top_realtime")
+        try:
+            if fb.exists():
+                artifacts_root = fb
+        except Exception:
+            pass
     alerts_dir = artifacts_root / "alerts"
 
     # Load telegram section from config for defaults/overrides
