@@ -348,5 +348,5 @@ notifications:
     kinds: storm,pre_alert
     only_new: true
     include_json: true
-    cooldown_min: 60
+    cooldown_min: 0  # disabled
     limit: 10
