@@ -324,6 +324,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "--artifacts", str(artifacts_root),
                         "--kinds", args.telegram_kinds,
                         "--no-filters",
+                        *( ["--debug"] if bool(tg_cfg.get("debug")) else [] ),
                     ])  # type: ignore[arg-type]
                 else:
                     # Dynamic lookback: if cycle took longer than one bar, include prior bars (cap at 3)
@@ -341,6 +342,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                         "--kinds", args.telegram_kinds,
                         "--only-new",
                         "--since-ts", str(int(since_ts)),
+                        *( ["--debug"] if bool(tg_cfg.get("debug")) else [] ),
                     ])  # type: ignore[arg-type]
             except Exception:
                 pass

@@ -163,6 +163,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--limit", type=int, default=None, help="Max alerts to send this run (newest with storm priority)")
     parser.add_argument("--cooldown-min", type=int, default=None, help="Per-symbol cooldown minutes (skip alerts sent recently)")
     parser.add_argument("--no-filters", action="store_true", help="Disable only-new, cooldown, limit and since-ts filtering (send everything)")
+    parser.add_argument("--debug", action="store_true", help="Print detailed selection and sending summary (counts and items)")
 
     args = parser.parse_args(argv)
 
@@ -230,6 +231,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Effective dry_run and since_ts / only_new
     eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
     eff_no_filters = bool(args.no_filters or bool(tg_cfg.get("no_filters")))
+    eff_debug = bool(args.debug or bool(tg_cfg.get("debug")))
     eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
 
     # Sensible default: if since_ts not provided, read last realtime bar_ts from metrics and use that (ms)
@@ -271,6 +273,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     rows = _iter_alert_rows(alerts_dir, eff.symbols, kinds, eff_since_ts)
     if not rows:
+        print(
+            f"alerts: scanned=0 kinds={','.join(kinds) or '-'} since_ts={eff_since_ts or '-'} only_new={'on' if (not eff_no_filters and eff_only_new) else 'off'} cooldown_min={(eff_cooldown_min or 0) if not eff_no_filters else 0} limit={(eff_limit if (not eff_no_filters and eff_limit) else 'none')} to_send=0"
+        )
         print("No alerts to send.")
         return 0
 
@@ -291,6 +296,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # First pass: build candidate list with only-new and cooldown filtering
     cooldown_ms = int(eff_cooldown_min) * 60 * 1000 if isinstance(eff_cooldown_min, int) and eff_cooldown_min > 0 else None
     candidates: List[dict] = []
+    removed_only_new = 0
+    removed_cooldown = 0
     for r in rows:
         try:
             sym = str(r.get("symbol") or "")
@@ -298,10 +305,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             kind = str(r.get("kind") or "pre_alert")
             key = f"{sym}:{kind}:{ts}"
             if eff_only_new and isinstance(sent, dict) and sent.get(key):
+                removed_only_new += 1
                 continue
             if cooldown_ms is not None:
                 last_ts = last_by_symbol.get(sym)
                 if isinstance(last_ts, (int, float)) and (ts - int(last_ts)) < cooldown_ms:
+                    removed_cooldown += 1
                     continue
             score = None
             thr = None
@@ -331,6 +340,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     candidates.sort(key=lambda x: (_prio(x["kind"]), -int(x["ts"])))
     if isinstance(eff_limit, int) and eff_limit > 0 and len(candidates) > eff_limit:
         candidates = candidates[: eff_limit]
+
+    # Summary (before sending)
+    try:
+        scanned = len(rows)
+        planned = len(candidates)
+        print(
+            f"alerts: scanned={scanned} kinds={','.join(kinds) or '-'} since_ts={eff_since_ts or '-'} only_new={'on' if (not eff_no_filters and eff_only_new) else 'off'} removed_only_new={removed_only_new} cooldown_min={(eff_cooldown_min or 0) if not eff_no_filters else 0} removed_cooldown={removed_cooldown} limit={(eff_limit if (not eff_no_filters and eff_limit) else 'none')} to_send={planned}"
+        )
+        if eff_debug and planned > 0:
+            for it in candidates:
+                try:
+                    print(
+                        f"  - {it['sym']} {it['kind']} ts={_utc_iso(it['ts'])} score={(it['score'] if it['score'] is not None else '')} thr={(it['thr'] if it['thr'] is not None else '')}"
+                    )
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     # Send
     sent_now = 0
