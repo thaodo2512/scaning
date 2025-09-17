@@ -317,22 +317,31 @@ def main(argv: Optional[list[str]] = None) -> int:
             from ..notify.telegram import main as telegram_main
 
             try:
-                # Dynamic lookback: if cycle took longer than one bar, include prior bars (cap at 3)
-                step_ms = 5 * 60 * 1000 if bar_iv == "5m" else 15 * 60 * 1000
-                lag_s = max(0.0, time.monotonic() - _cycle_start)
-                bars_back = int((lag_s * 1000 + step_ms - 1) // step_ms)
-                if bars_back < 0:
-                    bars_back = 0
-                if bars_back > 3:
-                    bars_back = 3
-                since_ts = int(bar_ts) - bars_back * step_ms
-                telegram_main([
-                    cfg.get("_path", ""),
-                    "--artifacts", str(artifacts_root),
-                    "--kinds", args.telegram_kinds,
-                    "--only-new",
-                    "--since-ts", str(int(since_ts)),
-                ])  # type: ignore[arg-type]
+                tg_cfg = ((cfg.get("notifications") or {}).get("telegram") or {}) if isinstance(cfg.get("notifications"), dict) else {}
+                if bool(tg_cfg.get("no_filters")):
+                    telegram_main([
+                        cfg.get("_path", ""),
+                        "--artifacts", str(artifacts_root),
+                        "--kinds", args.telegram_kinds,
+                        "--no-filters",
+                    ])  # type: ignore[arg-type]
+                else:
+                    # Dynamic lookback: if cycle took longer than one bar, include prior bars (cap at 3)
+                    step_ms = 5 * 60 * 1000 if bar_iv == "5m" else 15 * 60 * 1000
+                    lag_s = max(0.0, time.monotonic() - _cycle_start)
+                    bars_back = int((lag_s * 1000 + step_ms - 1) // step_ms)
+                    if bars_back < 0:
+                        bars_back = 0
+                    if bars_back > 3:
+                        bars_back = 3
+                    since_ts = int(bar_ts) - bars_back * step_ms
+                    telegram_main([
+                        cfg.get("_path", ""),
+                        "--artifacts", str(artifacts_root),
+                        "--kinds", args.telegram_kinds,
+                        "--only-new",
+                        "--since-ts", str(int(since_ts)),
+                    ])  # type: ignore[arg-type]
             except Exception:
                 pass
         # Optional reports
@@ -467,22 +476,31 @@ def main(argv: Optional[list[str]] = None) -> int:
                 from ..notify.telegram import main as telegram_main
 
                 try:
-                    # Dynamic lookback for long cycles (cap at 3 bars)
-                    step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
-                    lag_s = max(0.0, time.monotonic() - _cycle_start)
-                    bars_back = int((lag_s * 1000 + step_ms - 1) // step_ms)
-                    if bars_back < 0:
-                        bars_back = 0
-                    if bars_back > 3:
-                        bars_back = 3
-                    since_ts = int(bar_ts) - bars_back * step_ms
-                    telegram_main([
-                        cfg.get("_path", ""),
-                        "--artifacts", str(artifacts_root),
-                        "--kinds", args.telegram_kinds,
-                        "--only-new",
-                        "--since-ts", str(int(since_ts)),
-                    ])  # type: ignore[arg-type]
+                    tg_cfg = ((cfg.get("notifications") or {}).get("telegram") or {}) if isinstance(cfg.get("notifications"), dict) else {}
+                    if bool(tg_cfg.get("no_filters")):
+                        telegram_main([
+                            cfg.get("_path", ""),
+                            "--artifacts", str(artifacts_root),
+                            "--kinds", args.telegram_kinds,
+                            "--no-filters",
+                        ])  # type: ignore[arg-type]
+                    else:
+                        # Dynamic lookback for long cycles (cap at 3 bars)
+                        step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+                        lag_s = max(0.0, time.monotonic() - _cycle_start)
+                        bars_back = int((lag_s * 1000 + step_ms - 1) // step_ms)
+                        if bars_back < 0:
+                            bars_back = 0
+                        if bars_back > 3:
+                            bars_back = 3
+                        since_ts = int(bar_ts) - bars_back * step_ms
+                        telegram_main([
+                            cfg.get("_path", ""),
+                            "--artifacts", str(artifacts_root),
+                            "--kinds", args.telegram_kinds,
+                            "--only-new",
+                            "--since-ts", str(int(since_ts)),
+                        ])  # type: ignore[arg-type]
                 except Exception:
                     pass
             # Optional reports
