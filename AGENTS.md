@@ -136,7 +136,7 @@ Updated behaviors (2025‑09‑13):
   - E2E pipeline (15m): `bash scripts/run_e2e.sh -c configs/realtime.yaml -l INFO`
     - Strict mode: `CRYPTOSTORM_STRICT_EMPTY=1 bash scripts/run_e2e.sh -c configs/realtime.yaml -l DEBUG`
   - Realtime single cycle: `python -m cryptostorm realtime configs/realtime.yaml --once --bar-interval 15m`
-  - Continuous realtime (compose): `docker compose up realtime`
+  - Continuous realtime (compose): `docker compose up realtime` (includes one‑time tuned bootstrap: Top‑N → retrieve → features(15m) → tune q → merge → backtest, then runs realtime `--online`)
   - Coinglass limiter: realtime uses a global limiter set to ~250 req/min by default (`--coinglass-rps 4.1667`).
   - Bar settle: default poll offset is 15s to let the bar settle before retrieving.
 

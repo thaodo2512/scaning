@@ -123,6 +123,11 @@
     - `COINGLASS_API_KEY=... bash scripts/run_realtime.sh -c configs/realtime.yaml --ensure-data --online --watch --build-reports`
     - Choose engine: `price` (default), `plotly`, or `lightweight`.
 
+- One‑time tuned bootstrap (Top‑N → retrieve → features(15m) → tune q → merge → backtest) before realtime:
+  - `bash scripts/run_realtime.sh -c configs/realtime.yaml --bootstrap-tuned --top 200 --online --watch`
+  - Optional: speed up tuner with a smaller grid: `--q-grid "0.972,0.980,0.988"`
+  - Idempotent: leaves a marker at `artifacts/<RUN_ID>/.bootstrapped` and skips on next start.
+
 ### Realtime Config
 - A production‑ready config tailored for the realtime loop is provided at `configs/realtime.yaml`.
 - It mirrors `configs/top.yaml` but fixes `run.run_id: realtime` so artifacts consolidate under `artifacts/realtime/`, and includes a `notifications.telegram` section.
@@ -186,8 +191,10 @@
 ## Docker Usage
 - Build images once:
   - `docker compose build`
-- Continuous realtime (updates reports every 5m; default price+alerts reports):
+- Continuous realtime with tuned bootstrap (one‑command startup):
   - `COINGLASS_API_KEY=... docker compose up realtime`
+  - The `realtime` service runs a one‑time bootstrap: select Top 200, retrieve once, build 15m features, tune q and merge overlay, backtest to persist artifacts, then starts the realtime loop (`--online`).
+  - Idempotent via `artifacts/<RUN_ID>/.bootstrapped`.
   - Open `reports/index.html`
   - Tail logs: `docker compose logs -f realtime`
   - Background mode: `docker compose up -d realtime`
