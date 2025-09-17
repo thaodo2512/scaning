@@ -94,6 +94,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_tel.add_argument("--since-ts", type=int, default=None)
     p_tel.add_argument("--only-new", action="store_true")
     p_tel.add_argument("--dry-run", action="store_true")
+    p_tel.add_argument("--include-json", action="store_true")
+    p_tel.add_argument("--limit", type=int, default=None)
+    p_tel.add_argument("--cooldown-min", type=int, default=None)
+    p_tel.add_argument("--no-filters", action="store_true")
 
     p_rt = sub.add_parser("realtime", help="Realtime loop: retrieve → features(update-last) → backtest → (optional) alerts")
     p_rt.add_argument("config", type=str)
@@ -277,6 +281,14 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--only-new"]
         if args.dry_run:
             argv += ["--dry-run"]
+        if args.include_json:
+            argv += ["--include-json"]
+        if args.limit is not None:
+            argv += ["--limit", str(int(args.limit))]
+        if args.cooldown_min is not None:
+            argv += ["--cooldown-min", str(int(args.cooldown_min))]
+        if args.no_filters:
+            argv += ["--no-filters"]
         return telegram_notify_main(argv)
 
     if args.cmd == "realtime":
