@@ -162,6 +162,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--include-json", action="store_true", help="Append a compact one-line JSON context for AI copy/paste")
     parser.add_argument("--limit", type=int, default=None, help="Max alerts to send this run (newest with storm priority)")
     parser.add_argument("--cooldown-min", type=int, default=None, help="Per-symbol cooldown minutes (skip alerts sent recently)")
+    parser.add_argument("--no-filters", action="store_true", help="Disable only-new, cooldown, limit and since-ts filtering (send everything)")
 
     args = parser.parse_args(argv)
 
@@ -228,10 +229,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     # Effective dry_run and since_ts / only_new
     eff_dry = bool(args.dry_run or bool(tg_cfg.get("dry_run")))
+    eff_no_filters = bool(args.no_filters or bool(tg_cfg.get("no_filters")))
     eff_since_ts = args.since_ts if args.since_ts is not None else (int(tg_cfg.get("since_ts")) if isinstance(tg_cfg.get("since_ts"), (int, float)) else None)
 
     # Sensible default: if since_ts not provided, read last realtime bar_ts from metrics and use that (ms)
-    if eff_since_ts is None:
+    if eff_since_ts is None and not eff_no_filters:
         try:
             mfp = alerts_dir.parent / "metrics" / "realtime.jsonl"
             if mfp.exists():
@@ -255,10 +257,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     eff_since_ts = int(last["bar_ts"]) * 1000 - lookback_bars * step_ms
         except Exception:
             eff_since_ts = None
-    eff_only_new = bool(args.only_new or bool(tg_cfg.get("only_new")))
+    eff_only_new = False if eff_no_filters else bool(args.only_new or bool(tg_cfg.get("only_new")))
     eff_include_json = bool(args.include_json or bool(tg_cfg.get("include_json")))
-    eff_limit = int(args.limit) if args.limit is not None else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) else None)
-    eff_cooldown_min = int(args.cooldown_min) if args.cooldown_min is not None else (int(tg_cfg.get("cooldown_min")) if isinstance(tg_cfg.get("cooldown_min"), (int, float)) else None)
+    eff_limit = None if eff_no_filters else (int(args.limit) if args.limit is not None else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) else None))
+    eff_cooldown_min = None if eff_no_filters else (int(args.cooldown_min) if args.cooldown_min is not None else (int(tg_cfg.get("cooldown_min")) if isinstance(tg_cfg.get("cooldown_min"), (int, float)) else None))
 
     # Deduplicate and sanitize recipients
     recipients = [r for r in {r for r in recipients if r}]
