@@ -22,6 +22,9 @@ Options:
       --log-level <lvl>      Log level for realtime (default: INFO)
       --report-engine <eng>  Report engine: plotly|lightweight|price (default: price)
       --build-reports        Build reports after each realtime cycle and update index.html
+      --bootstrap-tuned      One-time bootstrap before realtime: binance-top -> retrieve -> features(15m) -> tune q -> merge overlay -> backtest
+      --top <n>              Top N symbols for bootstrap binance-top (default: 200)
+      --q-grid <list>        Custom q-grid for tuner (comma-separated, default tuner grid)
       --ensure-data          Audit 30d coverage and backfill missing raw data
       --ensure-min-ratio <r> Coverage threshold for ensure step (default: 0.95)
       --ensure-workers <n>   Workers for ensure backfill (default: 1)
@@ -63,6 +66,9 @@ MONITOR_VIEW="alerts"
 MONITOR_SYMBOLS="20"
 WORKERS_AUTO=""
 RELOAD_CFG="0"
+BOOTSTRAP_TUNED="0"
+TOP_N="200"
+Q_GRID=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -81,6 +87,9 @@ while [[ $# -gt 0 ]]; do
     --log-level) LOG_LEVEL="$2"; shift 2;;
     --report-engine) REPORT_ENGINE="$2"; shift 2;;
     --build-reports) BUILD_REPORTS="1"; shift;;
+    --bootstrap-tuned) BOOTSTRAP_TUNED="1"; shift;;
+    --top) TOP_N="$2"; shift 2;;
+    --q-grid) Q_GRID="$2"; shift 2;;
     --ensure-data) ENSURE_DATA="1"; shift;;
     --ensure-min-ratio) ENSURE_MIN_RATIO="$2"; shift 2;;
     --ensure-workers) ENSURE_WORKERS="$2"; shift 2;;
@@ -120,6 +129,96 @@ if [[ -z "$WORKERS" || "$WORKERS" -lt 1 ]]; then WORKERS=1; fi
 
 echo "[1/3] Validate config"
 python -m cryptostorm validate "$CONFIG" --no-require-env || true
+
+# Helpers reused from trainer
+resolve_artifacts_root() {
+  python - "$CONFIG" <<'PY'
+import json,sys
+from pathlib import Path
+try:
+  p=Path(sys.argv[1])
+  txt=p.read_text(encoding='utf-8')
+  if p.suffix.lower() in {'.yaml','.yml'}:
+    import yaml
+    cfg=yaml.safe_load(txt) or {}
+  else:
+    cfg=json.loads(txt)
+  run=cfg.get('run') or {}
+  root=(run.get('artifacts_root') or './artifacts')
+  run_id=(run.get('run_id') or 'run')
+  print(f"{root}/{run_id}")
+except Exception:
+  print('./artifacts/run')
+PY
+}
+
+merge_threshold_overlay_inline() {
+  local cfg="$1"
+  local overlay="artifacts/tuning/overlay_thresholds.yaml"
+  if [[ ! -f "$overlay" ]]; then
+    return
+  fi
+  echo "[bootstrap] merging tuned thresholds overlay -> $cfg ($overlay)"
+  python - "$cfg" "$overlay" <<'PY' || true
+import sys, json
+from pathlib import Path
+cfgp, ovp = Path(sys.argv[1]), Path(sys.argv[2])
+try:
+  txt = cfgp.read_text(encoding='utf-8')
+  if cfgp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    cfg = yaml.safe_load(txt) or {}
+  else:
+    cfg = json.loads(txt)
+  ovtxt = ovp.read_text(encoding='utf-8')
+  if ovp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    overlay = yaml.safe_load(ovtxt) or {}
+  else:
+    overlay = json.loads(ovtxt)
+  tgt = (cfg.setdefault('model', {})
+             .setdefault('threshold_q_per_symbol', {}))
+  src = (overlay.get('model') or {}).get('threshold_q_per_symbol') or {}
+  if isinstance(src, dict):
+    tgt.update(src)
+  # Write back, preserving YAML when possible
+  if cfgp.suffix.lower() in {'.yaml','.yml'}:
+    import yaml  # type: ignore
+    cfgp.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding='utf-8')
+  else:
+    cfgp.write_text(json.dumps(cfg, indent=2), encoding='utf-8')
+  print(f"merged {len(src)} symbol thresholds")
+except Exception as e:
+  print(f"merge overlay failed: {e}")
+PY
+}
+
+# Optional tuned bootstrap (idempotent via marker)
+if [[ "$BOOTSTRAP_TUNED" == "1" ]]; then
+  ARTIFACTS_DIR=${ARTIFACTS_DIR:-"$(resolve_artifacts_root)"}
+  BOOTSTRAP_MARKER="$ARTIFACTS_DIR/.bootstrapped"
+  if [[ -f "$BOOTSTRAP_MARKER" ]]; then
+    echo "[bootstrap] marker present at $BOOTSTRAP_MARKER — skipping bootstrap"
+  else
+    echo "[bootstrap] Selecting top $TOP_N symbols -> $CONFIG"
+    python -m cryptostorm binance-top --top "$TOP_N" --out "$CONFIG" --print || true
+    echo "[bootstrap] Retrieve (once) -> $DATA_DIR"
+    python -m cryptostorm retrieve "$CONFIG" --out "$DATA_DIR" --watch --once --workers "$ENSURE_WORKERS" --rps "$ENSURE_RPS" || true
+    echo "[bootstrap] Build 15m features -> $FEATURES_DIR"
+    python -m cryptostorm feature "$CONFIG" --data "$DATA_DIR" --out "$FEATURES_DIR" --interval 15m || true
+    echo "[bootstrap] Tune thresholds (q-sweep)"
+    if [[ -n "$Q_GRID" ]]; then
+      python scripts/tune_thresholds.py --config "$CONFIG" --features "$FEATURES_DIR" --features-interval 15m --q-grid "$Q_GRID"
+    else
+      python scripts/tune_thresholds.py --config "$CONFIG" --features "$FEATURES_DIR" --features-interval 15m
+    fi
+    merge_threshold_overlay_inline "$CONFIG"
+    echo "[bootstrap] Persist tuned artifacts via backtest"
+    python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval 15m || true
+    mkdir -p "$(dirname "$BOOTSTRAP_MARKER")" && date -u +%F\ %T > "$BOOTSTRAP_MARKER" || true
+    echo "[bootstrap] done"
+  fi
+fi
 
 # Optional ensure-data step: audit and backfill
 if [[ "$ENSURE_DATA" == "1" ]]; then
