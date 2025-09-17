@@ -99,4 +99,4 @@ notifications:
     only_new: true
     include_json: true
     cooldown_min: 0       # per-symbol cooldown disabled
-    limit: 10             # max alerts per send run
+    limit: 0              # unlimited alerts per run

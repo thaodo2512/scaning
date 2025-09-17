@@ -71,7 +71,7 @@ notifications:
     only_new: true
     include_json: true
     cooldown_min: 0  # disabled
-    limit: 10
+    limit: 0  # unlimited
 features:
   funding:
     settlement_hours_utc:

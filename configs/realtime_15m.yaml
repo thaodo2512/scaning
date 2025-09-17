@@ -95,7 +95,7 @@ notifications:
     only_new: true
     include_json: true
     cooldown_min: 0  # disabled
-    limit: 10
+    limit: 0  # unlimited
 
 # 15m mode usage (raw remains 5m; features align to 15m):
 #  - Accumulate features_15m.csv via realtime:
