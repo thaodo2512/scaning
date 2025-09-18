@@ -334,58 +334,8 @@ PY
   TRAIN_START=$(date -u +%s)
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
   rm -f "$LOCK_FILE" || true
-  # Build threshold-change summary (best-effort)
-  TH_MSG="$(python - "$ARTIFACTS_DIR" <<'PY'
-import json, os, glob, sys, math, datetime as dt
-from pathlib import Path
-art = Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else Path(os.environ.get('ARTIFACTS_DIR','artifacts/run'))
-models = art/ 'models'
-def load_map():
-    m = {}
-    for fp in sorted(models.glob('*.json')):
-        try:
-            obj=json.loads(fp.read_text(encoding='utf-8') or '{}')
-            th = obj.get('threshold')
-            if isinstance(th,(int,float)):
-                m[fp.stem]=float(th)
-        except Exception:
-            continue
-    return m
-before_fp = art/'.locks'/'thresholds_before.json'
-try:
-    before = json.loads(before_fp.read_text(encoding='utf-8')) if before_fp.exists() else {}
-except Exception:
-    before = {}
-after = load_map()
-total = len(after)
-changes = []
-for sym, new in after.items():
-    old = before.get(sym)
-    if isinstance(old,(int,float)):
-        if not math.isclose(old, new, rel_tol=1e-9, abs_tol=1e-12):
-            dpct = (new-old)/old*100.0 if old!=0 else float('inf')
-            changes.append((sym, old, new, dpct))
-    else:
-        # new symbol
-        changes.append((sym, float('nan'), new, float('inf')))
-changes.sort(key=lambda x: (abs(x[3]) if math.isfinite(x[3]) else 1e9), reverse=True)
-ts = dt.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
-run_id = os.path.basename(str(art))
-lines = [f"⚙️ Thresholds updated — {run_id} (UTC {ts})", f"changed: {len(changes)}/{total} symbols"]
-top = changes[:10]
-if top:
-    lines.append('Top changes:')
-    for sym, old, new, dpct in top:
-        if math.isfinite(dpct) and not math.isnan(old):
-            lines.append(f"{sym} {old:.3f}→{new:.3f} ({dpct:+.1f}%)")
-        else:
-            lines.append(f"{sym} new→{new:.3f}")
-print("\n".join(lines))
-PY
-  )"
-  NOW_UTC=$(date -u +%F\ %T)
-  # Read symbol delta summary line (if present)
-  SYM_LINE=$(grep -m1 '^SYMBOL_DELTA ' "$ARTIFACTS_DIR/.locks/thresholds_before.json" 2>/dev/null || true)
+  # Build a simple threshold-change summary (avoid heredoc parse edge cases)
+  TH_MSG="⚙️ Thresholds updated — $(basename "$ARTIFACTS_DIR") (UTC $(date -u +%F\ %T))"
   # Compute train duration and append to metrics log
   TRAIN_END=$(date -u +%s)
   TRAIN_DUR=$((TRAIN_END-TRAIN_START))
@@ -400,7 +350,7 @@ row={'ts':end,'start_ts':start,'end_ts':end,'duration_s':end-start}
 with (art/'metrics'/'trainer_runs.jsonl').open('a', encoding='utf-8') as f:
   f.write(json.dumps(row)+"\n")
 PY
-  # Compose final message: threshold changes + symbol delta + duration
+  # Compose final message: threshold marker + symbol delta + duration
   DUR_MIN=$((TRAIN_DUR/60)); DUR_SEC=$((TRAIN_DUR%60))
   # Read symbol delta counts from metrics if present (suppress errors quietly)
   SYM_COUNTS="$(
