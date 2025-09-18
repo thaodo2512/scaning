@@ -219,6 +219,14 @@ def _simulate_selection(
     scanned = 0
     in_range = 0
     in_kind = 0
+    earliest_all: int | None = None
+    latest_all: int | None = None
+    earliest_in_range: int | None = None
+    latest_in_range: int | None = None
+    latest_before_since: int | None = None
+    counts_in_range_by_kind: dict[str, int] = {}
+    removed_kind = 0
+    removed_kind_samples: list[dict] = []
     candidates: list[dict] = []
     for sym in eff.symbols:
         fp = alerts_dir / f"{sym}.csv"
@@ -233,11 +241,28 @@ def _simulate_selection(
                     except Exception:
                         continue
                     scanned += 1
+                    # Track global bounds
+                    if earliest_all is None or ts < earliest_all:
+                        earliest_all = ts
+                    if latest_all is None or ts > latest_all:
+                        latest_all = ts
+                    if since_ts is not None and ts < int(since_ts):
+                        if latest_before_since is None or ts > latest_before_since:
+                            latest_before_since = ts
+                    
                     if since_ts is not None and ts < int(since_ts):
                         continue
                     in_range += 1
+                    if earliest_in_range is None or ts < earliest_in_range:
+                        earliest_in_range = ts
+                    if latest_in_range is None or ts > latest_in_range:
+                        latest_in_range = ts
                     kind = str((r.get("kind") or "pre_alert")).strip() or "pre_alert"
+                    counts_in_range_by_kind[kind] = counts_in_range_by_kind.get(kind, 0) + 1
                     if kinds_eff and kind not in kinds_eff:
+                        removed_kind += 1
+                        if len(removed_kind_samples) < 5:
+                            removed_kind_samples.append({"sym": sym, "kind": kind, "ts": ts})
                         continue
                     in_kind += 1
                     # prepared item
@@ -255,6 +280,8 @@ def _simulate_selection(
 
     removed_only_new = 0
     removed_cooldown = 0
+    removed_only_new_samples: list[dict] = []
+    removed_cooldown_samples: list[dict] = []
     planned: list[dict] = []
 
     # Only-new and cooldown from send logs/registry
@@ -303,11 +330,15 @@ def _simulate_selection(
     for it in candidates:
         if only_new_eff and it["key"] in sent_keys:
             removed_only_new += 1
+            if len(removed_only_new_samples) < 5:
+                removed_only_new_samples.append({k: it[k] for k in ("sym","kind","ts")})
             continue
         if cooldown_ms is not None:
             last_ts = last_by_symbol.get(it["sym"]) if isinstance(last_by_symbol, dict) else None
             if isinstance(last_ts, int) and (int(it["ts"]) - last_ts) < cooldown_ms:
                 removed_cooldown += 1
+                if len(removed_cooldown_samples) < 5:
+                    removed_cooldown_samples.append({**{k: it[k] for k in ("sym","kind","ts")}, "last_ts": last_ts})
                 continue
         planned.append(it)
         if isinstance(limit_eff, int) and limit_eff > 0 and len(planned) >= limit_eff:
@@ -317,9 +348,19 @@ def _simulate_selection(
         "scanned": scanned,
         "in_range": in_range,
         "in_kind": in_kind,
+        "earliest_all": earliest_all,
+        "latest_all": latest_all,
+        "latest_before_since": latest_before_since,
+        "earliest_in_range": earliest_in_range,
+        "latest_in_range": latest_in_range,
+        "counts_in_range_by_kind": counts_in_range_by_kind,
         "planned": planned,
         "removed_only_new": removed_only_new,
+        "removed_only_new_samples": removed_only_new_samples,
         "removed_cooldown": removed_cooldown,
+        "removed_cooldown_samples": removed_cooldown_samples,
+        "removed_kind": removed_kind,
+        "removed_kind_samples": removed_kind_samples,
         "kinds": kinds_eff,
         "since_ts": since_ts,
         "only_new": only_new_eff,
@@ -460,6 +501,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                 }
                 for it in res["planned"]
             ]
+            # Add ISO hints
+            for k in ("earliest_all", "latest_all", "latest_before_since", "earliest_in_range", "latest_in_range"):
+                v = res.get(k)
+                if isinstance(v, int) and v > 0:
+                    out[k + "_iso"] = _dt.datetime.utcfromtimestamp(int(v) / 1000).strftime("%Y-%m-%d %H:%M:%SZ")
+            out["counts_in_range_by_kind"] = res.get("counts_in_range_by_kind", {})
+            out["removed_kind"] = res.get("removed_kind", 0)
+            out["removed_kind_samples"] = res.get("removed_kind_samples", [])
+            out["removed_only_new_samples"] = res.get("removed_only_new_samples", [])
+            out["removed_cooldown_samples"] = res.get("removed_cooldown_samples", [])
             print(json.dumps(out, indent=2))
             return 0
         # Text
@@ -471,12 +522,51 @@ def main(argv: Optional[List[str]] = None) -> int:
             # Heuristics to explain an empty plan
             if int(res.get("in_range") or 0) == 0:
                 print("reason: no alerts at or after since_ts for current symbols; try lowering --since-ts")
+                # Show nearest hints
+                try:
+                    import datetime as _dt
+                    lb = res.get("latest_before_since")
+                    ea = res.get("earliest_all")
+                    if isinstance(lb, int) and lb > 0:
+                        print("  nearest_before:", _dt.datetime.utcfromtimestamp(lb/1000).strftime("%Y-%m-%d %H:%M:%SZ"))
+                    if isinstance(ea, int) and ea > 0:
+                        print("  earliest_all:", _dt.datetime.utcfromtimestamp(ea/1000).strftime("%Y-%m-%d %H:%M:%SZ"))
+                except Exception:
+                    pass
             elif int(res.get("in_kind") or 0) == 0:
                 print("reason: no alerts of requested kinds in range; adjust --kinds or disable --kinds filter")
+                # Show counts by kind present
+                ck = res.get("counts_in_range_by_kind", {}) or {}
+                if ck:
+                    print("  kinds_in_range:", ", ".join([f"{k}={ck[k]}" for k in sorted(ck.keys())]))
+                rk = res.get("removed_kind_samples", []) or []
+                for it in rk:
+                    try:
+                        import datetime as _dt
+                        iso = _dt.datetime.utcfromtimestamp(int(it.get('ts',0))/1000).strftime("%Y-%m-%d %H:%M:%SZ")
+                    except Exception:
+                        iso = str(it.get('ts'))
+                    print(f"  sample_excluded_by_kind: {it.get('sym')} {it.get('kind')} ts={iso}")
             elif res.get("only_new") and int(res.get("removed_only_new") or 0) > 0:
                 print("reason: all candidates already sent (only-new active); drop --only-new or clear telegram_sent.json")
+                for it in res.get("removed_only_new_samples", [])[:3]:
+                    try:
+                        import datetime as _dt
+                        iso = _dt.datetime.utcfromtimestamp(int(it.get('ts',0))/1000).strftime("%Y-%m-%d %H:%M:%SZ")
+                    except Exception:
+                        iso = str(it.get('ts'))
+                    print(f"  sample_only_new: {it.get('sym')} {it.get('kind')} ts={iso}")
             elif int(res.get("removed_cooldown") or 0) > 0:
                 print("reason: suppressed by per-symbol cooldown; decrease --cooldown-min or widen window")
+                for it in res.get("removed_cooldown_samples", [])[:3]:
+                    try:
+                        import datetime as _dt
+                        iso = _dt.datetime.utcfromtimestamp(int(it.get('ts',0))/1000).strftime("%Y-%m-%d %H:%M:%SZ")
+                        liso = _dt.datetime.utcfromtimestamp(int(it.get('last_ts',0))/1000).strftime("%Y-%m-%d %H:%M:%SZ")
+                    except Exception:
+                        iso = str(it.get('ts'))
+                        liso = str(it.get('last_ts'))
+                    print(f"  sample_cooldown: {it.get('sym')} {it.get('kind')} ts={iso} last_sent={liso}")
             else:
                 print("reason: no eligible candidates after filters; consider --no-filters --limit 5 to inspect newest")
         for it in res["planned"][:20]:
