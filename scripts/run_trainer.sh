@@ -227,7 +227,7 @@ PY
     # Guard: ensure refreshed list still has TOP_N symbols when possible.
     # If the refresh produced fewer than TOP_N but the previous list had TOP_N,
     # restore the previous list to keep the target universe size stable.
-    python - <<'PY' "$CONFIG" "$LOCK_DIR" "$TOP_N" || true
+    python - "$CONFIG" "$LOCK_DIR" "$TOP_N" <<'PY' || true
 import json, sys
 from pathlib import Path
 cfgp, lockdir, top_str = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
@@ -273,7 +273,7 @@ else:
     print(f"[trainer] refresh size now {len(new_syms)} (target {top_n})")
 PY
     # Compute symbol delta and write metrics
-    python - <<'PY' "$CONFIG" "$ARTIFACTS_DIR" || true
+    python - "$CONFIG" "$ARTIFACTS_DIR" <<'PY' || true
 import json,sys,datetime as dt
 from pathlib import Path
 cfgp=Path(sys.argv[1]); art=Path(sys.argv[2])
@@ -383,7 +383,6 @@ if top:
 print("\n".join(lines))
 PY
   )"
-  )
   NOW_UTC=$(date -u +%F\ %T)
   # Read symbol delta summary line (if present)
   SYM_LINE=$(grep -m1 '^SYMBOL_DELTA ' "$ARTIFACTS_DIR/.locks/thresholds_before.json" 2>/dev/null || true)
@@ -392,7 +391,7 @@ PY
   TRAIN_DUR=$((TRAIN_END-TRAIN_START))
   # Persist trainer run metrics
   mkdir -p "$ARTIFACTS_DIR/metrics"
-  python - <<'PY' "$ARTIFACTS_DIR" "$TRAIN_START" "$TRAIN_END" || true
+  python - "$ARTIFACTS_DIR" "$TRAIN_START" "$TRAIN_END" <<'PY' || true
 import json,sys,datetime as dt
 from pathlib import Path
 art=Path(sys.argv[1])
