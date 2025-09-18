@@ -168,6 +168,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_merge.add_argument("config", type=str)
     p_merge.add_argument("--artifacts", type=str)
 
+    # Alerts utilities: compare generated vs sent
+    p_cmp = sub.add_parser("alerts-compare", help="Compare generated alerts vs Telegram sent log")
+    p_cmp.add_argument("config", type=str)
+    p_cmp.add_argument("--artifacts", type=str)
+    p_cmp.add_argument("--since-ts", type=int, default=None)
+    p_cmp.add_argument("--limit", type=int, default=20)
+    p_cmp.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "validate":
@@ -384,6 +392,17 @@ def main(argv: Optional[list[str]] = None) -> int:
         argv = ["merge", args.config]
         if args.artifacts:
             argv += ["--artifacts", args.artifacts]
+        return alerts_main(argv)
+    if args.cmd == "alerts-compare":  # pragma: no cover
+        argv = ["compare", args.config]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        if getattr(args, "since_ts", None) is not None:
+            argv += ["--since-ts", str(int(args.since_ts))]
+        if getattr(args, "limit", None) is not None:
+            argv += ["--limit", str(int(args.limit))]
+        if bool(getattr(args, "json", False)):
+            argv += ["--json"]
         return alerts_main(argv)
 
     # Hidden utility: select top Binance USDT-perps and update a config's universe.symbols
