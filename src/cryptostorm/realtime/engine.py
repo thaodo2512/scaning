@@ -478,9 +478,23 @@ def main(argv: Optional[list[str]] = None) -> int:
             if args.online_scoring:
                 from ..backtest.engine import score_online
 
-                score_online(cfg, eff, features_root=features_root, out_root=artifacts_root, workers=workers)
+                score_online(
+                    cfg,
+                    eff,
+                    features_root=features_root,
+                    out_root=artifacts_root,
+                    features_interval=("15m" if bar_iv == "15m" else "5m"),
+                    workers=workers,
+                )
             else:
-                run_backtest(cfg, eff, features_root=features_root, out_root=artifacts_root, workers=workers)
+                run_backtest(
+                    cfg,
+                    eff,
+                    features_root=features_root,
+                    out_root=artifacts_root,
+                    features_interval=("15m" if bar_iv == "15m" else "5m"),
+                    workers=workers,
+                )
             t3 = time.monotonic()
             if args.send_telegram:
                 from ..notify.telegram import main as telegram_main
