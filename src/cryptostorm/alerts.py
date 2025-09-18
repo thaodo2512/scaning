@@ -366,6 +366,7 @@ def _simulate_selection(
         "only_new": only_new_eff,
         "cooldown_min": cd_min_eff or 0,
         "limit": (limit_eff if limit_eff is not None else "none"),
+        "symbols": list(eff.symbols),
     }
 
 
@@ -533,6 +534,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                         print("  earliest_all:", _dt.datetime.utcfromtimestamp(ea/1000).strftime("%Y-%m-%d %H:%M:%SZ"))
                 except Exception:
                     pass
+                # List current symbols considered (trim for readability)
+                syms = list(res.get("symbols") or [])
+                if syms:
+                    max_show = 30
+                    shown = syms[:max_show]
+                    more = len(syms) - len(shown)
+                    print("  symbols:", ", ".join(shown) + (f" (+{more} more)" if more > 0 else ""))
             elif int(res.get("in_kind") or 0) == 0:
                 print("reason: no alerts of requested kinds in range; adjust --kinds or disable --kinds filter")
                 # Show counts by kind present
