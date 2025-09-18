@@ -176,6 +176,18 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_cmp.add_argument("--limit", type=int, default=20)
     p_cmp.add_argument("--json", action="store_true")
 
+    # Alerts utilities: simulate selection (no send)
+    p_sim = sub.add_parser("alerts-simulate", help="Simulate realtime alert sending using config telegram params (no send)")
+    p_sim.add_argument("config", type=str)
+    p_sim.add_argument("--artifacts", type=str)
+    p_sim.add_argument("--since-ts", type=int, default=None)
+    p_sim.add_argument("--kinds", type=str, default=None)
+    p_sim.add_argument("--no-filters", action="store_true")
+    p_sim.add_argument("--only-new", action="store_true")
+    p_sim.add_argument("--cooldown-min", type=int, default=None)
+    p_sim.add_argument("--limit", type=int, default=None)
+    p_sim.add_argument("--json", action="store_true")
+
     args = parser.parse_args(argv)
 
     if args.cmd == "validate":
@@ -399,6 +411,25 @@ def main(argv: Optional[list[str]] = None) -> int:
             argv += ["--artifacts", args.artifacts]
         if getattr(args, "since_ts", None) is not None:
             argv += ["--since-ts", str(int(args.since_ts))]
+        if getattr(args, "limit", None) is not None:
+            argv += ["--limit", str(int(args.limit))]
+        if bool(getattr(args, "json", False)):
+            argv += ["--json"]
+        return alerts_main(argv)
+    if args.cmd == "alerts-simulate":  # pragma: no cover
+        argv = ["simulate", args.config]
+        if args.artifacts:
+            argv += ["--artifacts", args.artifacts]
+        if getattr(args, "since_ts", None) is not None:
+            argv += ["--since-ts", str(int(args.since_ts))]
+        if getattr(args, "kinds", None):
+            argv += ["--kinds", args.kinds]
+        if bool(getattr(args, "no_filters", False)):
+            argv += ["--no-filters"]
+        if bool(getattr(args, "only_new", False)):
+            argv += ["--only-new"]
+        if getattr(args, "cooldown_min", None) is not None:
+            argv += ["--cooldown-min", str(int(args.cooldown_min))]
         if getattr(args, "limit", None) is not None:
             argv += ["--limit", str(int(args.limit))]
         if bool(getattr(args, "json", False)):

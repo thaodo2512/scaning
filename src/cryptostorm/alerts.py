@@ -142,6 +142,186 @@ def _parse_sent_alerts(artifacts_root: Path, since_ts: int | None = None) -> set
     return out
 
 
+def _read_send_log_list(artifacts_root: Path) -> list[dict]:
+    arr: list[dict] = []
+    fp = artifacts_root / "alerts" / "telegram_send.jsonl"
+    if not fp.exists():
+        return arr
+    try:
+        with fp.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except Exception:
+                    continue
+                arr.append(obj)
+    except Exception:
+        return arr
+    return arr
+
+
+def _infer_since_ts_ms(cfg: Mapping[str, Any], artifacts_root: Path) -> int | None:
+    try:
+        mfp = artifacts_root / "metrics" / "realtime.jsonl"
+        if not mfp.exists():
+            return None
+        lines = mfp.read_text(encoding="utf-8").splitlines()
+        if not lines:
+            return None
+        last = json.loads(lines[-1])
+        bar_s = float(last.get("bar_ts") or 0.0)
+        if bar_s <= 0:
+            return None
+        # Infer step from config futures_ohlcv
+        step_ms = 15 * 60 * 1000
+        try:
+            acq = cfg.get("acquisition") or {}
+            cg = (acq or {}).get("coinglass") or {}
+            iv = str((cg.get("intervals") or {}).get("futures_ohlcv") or "15m").lower()
+            if iv.endswith("m") and iv[:-1].isdigit():
+                step_ms = int(iv[:-1]) * 60 * 1000
+        except Exception:
+            pass
+        return int(bar_s * 1000) - step_ms
+    except Exception:
+        return None
+
+
+def _simulate_selection(
+    cfg: Mapping[str, Any],
+    eff: EffectiveConfig,
+    *,
+    artifacts_root: Path,
+    since_ts: int | None,
+    kinds: list[str] | None,
+    only_new: bool,
+    cooldown_min: int | None,
+    limit: int | None,
+    no_filters: bool,
+) -> dict:
+    alerts_dir = artifacts_root / "alerts"
+    # Defaults from config.telegram if not provided
+    tg_cfg = ((cfg.get("notifications") or {}).get("telegram") or {}) if isinstance(cfg.get("notifications"), dict) else {}
+    kinds_eff = kinds[:] if kinds else []
+    if not kinds_eff:
+        s = str(tg_cfg.get("kinds") or "storm").strip()
+        kinds_eff = [x.strip() for x in s.split(",") if x.strip()]
+    if not kinds_eff:
+        kinds_eff = ["storm"]
+    only_new_eff = False if no_filters else bool(tg_cfg.get("only_new", False) or only_new)
+    cd_min_eff = None if no_filters else (int(cooldown_min) if cooldown_min is not None else (int(tg_cfg.get("cooldown_min")) if isinstance(tg_cfg.get("cooldown_min"), (int, float)) else None))
+    limit_eff = None if no_filters else (int(limit) if (limit is not None and int(limit) > 0) else (int(tg_cfg.get("limit")) if isinstance(tg_cfg.get("limit"), (int, float)) and int(tg_cfg.get("limit")) > 0 else None))
+
+    # Load generated
+    scanned = 0
+    candidates: list[dict] = []
+    for sym in eff.symbols:
+        fp = alerts_dir / f"{sym}.csv"
+        if not fp.exists():
+            continue
+        try:
+            with fp.open("r", encoding="utf-8") as f:
+                rdr = csv.DictReader(f)
+                for r in rdr:
+                    try:
+                        ts = int(r.get("ts") or 0)
+                    except Exception:
+                        continue
+                    scanned += 1
+                    if since_ts is not None and ts < int(since_ts):
+                        continue
+                    kind = str((r.get("kind") or "pre_alert")).strip() or "pre_alert"
+                    if kinds_eff and kind not in kinds_eff:
+                        continue
+                    # prepared item
+                    it = {
+                        "sym": sym,
+                        "ts": ts,
+                        "kind": kind,
+                        "score": (r.get("score") if r.get("score") not in (None, "") else None),
+                        "thr": (r.get("threshold") if r.get("threshold") not in (None, "") else None),
+                        "key": f"{sym}:{kind}:{ts}",
+                    }
+                    candidates.append(it)
+        except Exception:
+            continue
+
+    removed_only_new = 0
+    removed_cooldown = 0
+    planned: list[dict] = []
+
+    # Only-new and cooldown from send logs/registry
+    sent_keys = set()
+    last_by_symbol: dict[str, int] = {}
+    for obj in _read_send_log_list(artifacts_root):
+        try:
+            ts = int(obj.get("bar_ts") or 0)
+            sym = str(obj.get("symbol") or "")
+            kind = str((obj.get("kind") or "pre_alert"))
+            if since_ts is not None and ts < int(since_ts):
+                continue
+            if sym:
+                k = f"{sym}:{kind}:{ts}"
+                sent_keys.add(k)
+                last_by_symbol[sym] = max(last_by_symbol.get(sym, 0), ts)
+        except Exception:
+            continue
+    # Fallback registry
+    if not sent_keys:
+        try:
+            reg_fp = artifacts_root / "alerts" / "telegram_sent.json"
+            if reg_fp.exists():
+                obj = json.loads(reg_fp.read_text(encoding="utf-8") or "{}")
+                for k, v in obj.items():
+                    if k == "_meta":
+                        continue
+                    sent_keys.add(k)
+                meta = obj.get("_meta", {}) if isinstance(obj, dict) else {}
+                lbt = meta.get("last_symbol_ts", {}) if isinstance(meta, dict) else {}
+                for s, t in lbt.items():
+                    try:
+                        last_by_symbol[str(s)] = int(t)
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+    # Sort by priority (storm first), newest first
+    def _prio(k: str) -> int:
+        return 0 if k == "storm" else 1 if k == "pre_alert" else 2
+
+    candidates.sort(key=lambda x: (_prio(x["kind"]), -int(x["ts"])) )
+
+    cooldown_ms = int(cd_min_eff) * 60 * 1000 if isinstance(cd_min_eff, int) and cd_min_eff > 0 else None
+    for it in candidates:
+        if only_new_eff and it["key"] in sent_keys:
+            removed_only_new += 1
+            continue
+        if cooldown_ms is not None:
+            last_ts = last_by_symbol.get(it["sym"]) if isinstance(last_by_symbol, dict) else None
+            if isinstance(last_ts, int) and (int(it["ts"]) - last_ts) < cooldown_ms:
+                removed_cooldown += 1
+                continue
+        planned.append(it)
+        if isinstance(limit_eff, int) and limit_eff > 0 and len(planned) >= limit_eff:
+            break
+
+    return {
+        "scanned": scanned,
+        "planned": planned,
+        "removed_only_new": removed_only_new,
+        "removed_cooldown": removed_cooldown,
+        "kinds": kinds_eff,
+        "since_ts": since_ts,
+        "only_new": only_new_eff,
+        "cooldown_min": cd_min_eff or 0,
+        "limit": (limit_eff if limit_eff is not None else "none"),
+    }
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="CryptoStorm alerts utilities")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -156,6 +336,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_cmp.add_argument("--since-ts", type=int, default=None, help="Only consider alerts with ts >= since (ms)")
     p_cmp.add_argument("--limit", type=int, default=20, help="Max differences to print")
     p_cmp.add_argument("--json", action="store_true", help="Output JSON summary instead of text")
+
+    p_sim = sub.add_parser("simulate", help="Simulate realtime alert sending (no send); uses config telegram params")
+    p_sim.add_argument("config", type=str)
+    p_sim.add_argument("--artifacts", type=str)
+    p_sim.add_argument("--since-ts", type=int, default=None)
+    p_sim.add_argument("--kinds", type=str, default=None)
+    p_sim.add_argument("--no-filters", action="store_true")
+    p_sim.add_argument("--only-new", action="store_true", help="Override: simulate only-new even if config disables it")
+    p_sim.add_argument("--cooldown-min", type=int, default=None)
+    p_sim.add_argument("--limit", type=int, default=None)
+    p_sim.add_argument("--json", action="store_true")
 
     args = parser.parse_args(argv)
 
@@ -231,6 +422,53 @@ def main(argv: Optional[List[str]] = None) -> int:
                     iso = str(ts)
                 print(f"  - {sym} {kind} ts={ts} ({iso})")
         return 1
+    if args.cmd == "simulate":
+        cfg = load_config(args.config)
+        eff, warns, errs = validate_config(cfg, require_env=False)
+        if errs:
+            for e in errs:
+                print(f"error: {e}")
+            return 2
+        run_id = (cfg.get("run") or {}).get("run_id") or eff.run_id
+        artifacts_root = Path(args.artifacts) if args.artifacts else Path((cfg.get("run") or {}).get("artifacts_root", "./artifacts")) / str(run_id)
+        since_ts = int(args.since_ts) if args.since_ts is not None else _infer_since_ts_ms(cfg, artifacts_root)
+        kinds = [s.strip() for s in str(args.kinds).split(",")] if args.kinds else None
+        res = _simulate_selection(
+            cfg,
+            eff,
+            artifacts_root=artifacts_root,
+            since_ts=since_ts,
+            kinds=kinds,
+            only_new=bool(args.only_new),
+            cooldown_min=(int(args.cooldown_min) if args.cooldown_min is not None else None),
+            limit=(int(args.limit) if args.limit is not None else None),
+            no_filters=bool(args.no_filters),
+        )
+        if args.json:
+            import datetime as _dt
+            out = dict(res)
+            out["planned"] = [
+                {
+                    **it,
+                    "ts_iso": _dt.datetime.utcfromtimestamp(int(it["ts"]) / 1000).strftime("%Y-%m-%d %H:%M:%SZ"),
+                }
+                for it in res["planned"]
+            ]
+            print(json.dumps(out, indent=2))
+            return 0
+        # Text
+        kinds_str = ",".join(res["kinds"]) if res.get("kinds") else "-"
+        print(
+            f"alerts-sim: scanned={res['scanned']} kinds={kinds_str} since_ts={res['since_ts'] or '-'} only_new={'on' if res['only_new'] else 'off'} removed_only_new={res['removed_only_new']} cooldown_min={res['cooldown_min']} removed_cooldown={res['removed_cooldown']} limit={res['limit']} to_send={len(res['planned'])}"
+        )
+        for it in res["planned"][:20]:
+            try:
+                import datetime as _dt
+                iso = _dt.datetime.utcfromtimestamp(int(it["ts"]) / 1000).strftime("%Y-%m-%d %H:%M:%SZ")
+            except Exception:
+                iso = str(it["ts"])
+            print(f"  - {it['sym']} {it['kind']} ts={iso}")
+        return 0
     return 0
 
 
