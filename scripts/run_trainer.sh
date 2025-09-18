@@ -335,10 +335,10 @@ PY
   python -m cryptostorm backtest "$CONFIG" --features "$FEATURES_DIR" --features-interval "$FEATURES_INTERVAL" --workers "$WORKERS" || true
   rm -f "$LOCK_FILE" || true
   # Build threshold-change summary (best-effort)
-  TH_MSG=$(python - <<'PY'
+  TH_MSG="$(python - "$ARTIFACTS_DIR" <<'PY'
 import json, os, glob, sys, math, datetime as dt
 from pathlib import Path
-art = Path(os.environ.get('ARTIFACTS_DIR','artifacts/run'))
+art = Path(sys.argv[1]) if len(sys.argv) > 1 and sys.argv[1] else Path(os.environ.get('ARTIFACTS_DIR','artifacts/run'))
 models = art/ 'models'
 def load_map():
     m = {}
@@ -382,6 +382,7 @@ if top:
             lines.append(f"{sym} new→{new:.3f}")
 print("\n".join(lines))
 PY
+  )"
   )
   NOW_UTC=$(date -u +%F\ %T)
   # Read symbol delta summary line (if present)
