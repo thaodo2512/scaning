@@ -21,6 +21,7 @@ Options:
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
       --log-level <lvl>      Log level for realtime (default: INFO)
       --report-engine <eng>  Report engine: plotly|lightweight|price (default: price)
+      --bar-interval 15m     Bar cadence for realtime loop (default: 15m)
       --build-reports        Build reports after each realtime cycle and update index.html
       --bootstrap-tuned      One-time bootstrap before realtime: binance-top -> retrieve -> features(15m) -> tune q -> merge overlay -> backtest
       --top <n>              Top N symbols for bootstrap binance-top (default: 200)
@@ -56,6 +57,7 @@ SEND_TG="0"
 TG_KINDS="storm"
 LOG_LEVEL="INFO"
 REPORT_ENGINE="price"
+BAR_INTERVAL="15m"
 BUILD_REPORTS="0"
 ENSURE_DATA="0"
 ENSURE_MIN_RATIO="0.95"
@@ -86,6 +88,7 @@ while [[ $# -gt 0 ]]; do
     --telegram-kinds) TG_KINDS="$2"; shift 2;;
     --log-level) LOG_LEVEL="$2"; shift 2;;
     --report-engine) REPORT_ENGINE="$2"; shift 2;;
+    --bar-interval) BAR_INTERVAL="$2"; shift 2;;
     --build-reports) BUILD_REPORTS="1"; shift;;
     --bootstrap-tuned) BOOTSTRAP_TUNED="1"; shift;;
     --top) TOP_N="$2"; shift 2;;
@@ -236,7 +239,7 @@ if [[ "$ENSURE_DATA" == "1" ]]; then
 fi
 
 echo "[2/3] Realtime $( [[ "$ONCE" == "1" ]] && echo once || echo watch ) (online=$ONLINE)"
-RT_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --poll-offset-s "$POLL_OFFSET" --jitter-s "$JITTER" --log-level "$LOG_LEVEL" --workers "$WORKERS")
+RT_ARGS=("$CONFIG" --data "$DATA_DIR" --features "$FEATURES_DIR" --poll-offset-s "$POLL_OFFSET" --jitter-s "$JITTER" --log-level "$LOG_LEVEL" --workers "$WORKERS" --bar-interval "$BAR_INTERVAL")
 if [[ -n "$ARTIFACTS_DIR" ]]; then RT_ARGS+=(--artifacts "$ARTIFACTS_DIR"); fi
 if [[ "$ONCE" == "1" ]]; then RT_ARGS+=(--once); fi
 if [[ "$ONLINE" == "1" ]]; then RT_ARGS+=(--online-scoring); fi
