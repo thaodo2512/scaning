@@ -217,6 +217,8 @@ def _simulate_selection(
 
     # Load generated
     scanned = 0
+    in_range = 0
+    in_kind = 0
     candidates: list[dict] = []
     for sym in eff.symbols:
         fp = alerts_dir / f"{sym}.csv"
@@ -233,9 +235,11 @@ def _simulate_selection(
                     scanned += 1
                     if since_ts is not None and ts < int(since_ts):
                         continue
+                    in_range += 1
                     kind = str((r.get("kind") or "pre_alert")).strip() or "pre_alert"
                     if kinds_eff and kind not in kinds_eff:
                         continue
+                    in_kind += 1
                     # prepared item
                     it = {
                         "sym": sym,
@@ -311,6 +315,8 @@ def _simulate_selection(
 
     return {
         "scanned": scanned,
+        "in_range": in_range,
+        "in_kind": in_kind,
         "planned": planned,
         "removed_only_new": removed_only_new,
         "removed_cooldown": removed_cooldown,
@@ -459,8 +465,20 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Text
         kinds_str = ",".join(res["kinds"]) if res.get("kinds") else "-"
         print(
-            f"alerts-sim: scanned={res['scanned']} kinds={kinds_str} since_ts={res['since_ts'] or '-'} only_new={'on' if res['only_new'] else 'off'} removed_only_new={res['removed_only_new']} cooldown_min={res['cooldown_min']} removed_cooldown={res['removed_cooldown']} limit={res['limit']} to_send={len(res['planned'])}"
+            f"alerts-sim: scanned={res['scanned']} in_range={res['in_range']} in_kind={res['in_kind']} kinds={kinds_str} since_ts={res['since_ts'] or '-'} only_new={'on' if res['only_new'] else 'off'} removed_only_new={res['removed_only_new']} cooldown_min={res['cooldown_min']} removed_cooldown={res['removed_cooldown']} limit={res['limit']} to_send={len(res['planned'])}"
         )
+        if not res["planned"]:
+            # Heuristics to explain an empty plan
+            if int(res.get("in_range") or 0) == 0:
+                print("reason: no alerts at or after since_ts for current symbols; try lowering --since-ts")
+            elif int(res.get("in_kind") or 0) == 0:
+                print("reason: no alerts of requested kinds in range; adjust --kinds or disable --kinds filter")
+            elif res.get("only_new") and int(res.get("removed_only_new") or 0) > 0:
+                print("reason: all candidates already sent (only-new active); drop --only-new or clear telegram_sent.json")
+            elif int(res.get("removed_cooldown") or 0) > 0:
+                print("reason: suppressed by per-symbol cooldown; decrease --cooldown-min or widen window")
+            else:
+                print("reason: no eligible candidates after filters; consider --no-filters --limit 5 to inspect newest")
         for it in res["planned"][:20]:
             try:
                 import datetime as _dt
