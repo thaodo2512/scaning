@@ -434,8 +434,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             next_target = (_utc_now_ms() - (_utc_now_ms() % step_ms)) + step_ms + int(args.poll_offset_s * 1000)
             _sleep_until(next_target, args.jitter_s)
             continue
+        # Resolve effective bar interval (treat 'auto' like the once-path: infer from config)
+        bar_iv = args.bar_interval
+        if bar_iv == "auto":
+            try:
+                iv = (((cfg.get("acquisition") or {}).get("coinglass") or {}).get("intervals") or {}).get("futures_ohlcv", "15m")
+                bar_iv = str(iv)
+            except Exception:
+                bar_iv = "15m"
         now = _utc_now_ms()
-        step_ms = 5 * 60 * 1000 if args.bar_interval == "5m" else 15 * 60 * 1000
+        step_ms = 5 * 60 * 1000 if bar_iv == "5m" else 15 * 60 * 1000
         bar_ts = now - (now % step_ms)
         target = bar_ts + int(args.poll_offset_s * 1000)
         if now < target:
@@ -455,13 +463,13 @@ def main(argv: Optional[list[str]] = None) -> int:
                     data_root=data_root,
                     out_root=features_root,
                     now_ms=None,
-                    interval=("15m" if args.bar_interval == "15m" else "5m"),
+                    interval=("15m" if bar_iv == "15m" else "5m"),
                     update_last=True,
                     workers=workers,
                     log_level=args.log_level,
                 )
             else:
-                if args.bar_interval == "15m":
+                if bar_iv == "15m":
                     from ..feature.engine import update_features_last_15m as _upd
                     _upd(eff, data_root=data_root, out_root=features_root)
                 else:
