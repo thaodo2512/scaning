@@ -353,21 +353,22 @@ PY
   # Compose final message: threshold marker + symbol delta + duration
   DUR_MIN=$((TRAIN_DUR/60)); DUR_SEC=$((TRAIN_DUR%60))
   # Read symbol delta counts from metrics if present (suppress errors quietly)
-  SYM_COUNTS="$(
-    python - "$ARTIFACTS_DIR" <<'PY' 2>/dev/null
-import json,sys
-from pathlib import Path
-art=Path(sys.argv[1])
-delta=art/'metrics'/'symbol_delta.json'
+  if [[ -f "$ARTIFACTS_DIR/metrics/symbol_delta.json" ]]; then
+    SYM_COUNTS="$(python - "$ARTIFACTS_DIR/metrics/symbol_delta.json" -c '
+import sys,json
 try:
-  obj=json.loads(delta.read_text(encoding='utf-8'))
-  add=obj.get('added_count',0) or 0
-  rem=obj.get('removed_count',0) or 0
-  print(f"symbols: +{int(add)} −{int(rem)}")
+    p = sys.argv[1]
+    with open(p, encoding="utf-8") as f:
+        obj = json.load(f)
+    add = int(obj.get("added_count", 0) or 0)
+    rem = int(obj.get("removed_count", 0) or 0)
+    print(f"symbols: +{add} −{rem}")
 except Exception:
-  pass
-PY
-  )"
+    pass
+' 2>/dev/null || true)"
+  else
+    SYM_COUNTS=""
+  fi
   if [[ -n "$SYM_COUNTS" ]]; then
     FINAL_MSG="$TH_MSG\n$SYM_COUNTS\ntrain_duration: ${DUR_MIN}m ${DUR_SEC}s"
   else
