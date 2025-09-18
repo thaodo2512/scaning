@@ -12,6 +12,7 @@ Options:
       --features-interval <iv> Features cadence for backtest: 5m|15m|auto (default: 15m)
   -w, --workers <n>            Backtest workers (default: auto from CRYPTOSTORM_WORKERS or CPU)
       --sleep-hours <h>        Sleep hours between training runs (default: auto from model.retrain_every_hours or 8)
+      --top <n>                Top N symbols to select on each refresh (default: 200)
   -h, --help                   Show help
 
 Notes:
@@ -25,6 +26,7 @@ FEATURES_DIR="features"
 FEATURES_INTERVAL="15m"
 WORKERS=""
 SLEEP_HOURS="auto"
+TOP="200"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,6 +35,7 @@ while [[ $# -gt 0 ]]; do
     --features-interval) FEATURES_INTERVAL="$2"; shift 2;;
     -w|--workers) WORKERS="$2"; shift 2;;
     --sleep-hours) SLEEP_HOURS="$2"; shift 2;;
+    --top) TOP="$2"; shift 2;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown option: $1" >&2; usage; exit 2;;
   esac
@@ -200,7 +203,7 @@ while true; do
   # Optionally refresh universe.symbols before retrain (default on)
   if [[ "${TRAINER_REFRESH_SYMBOLS:-1}" == "1" ]]; then
     # Snapshot symbols before refresh
-    python - "$CONFIG" "$LOCK_DIR" <<'PY' || true
+  python - "$CONFIG" "$LOCK_DIR" <<'PY' || true
 import json,sys
 from pathlib import Path
 try:
@@ -217,22 +220,8 @@ try:
 except Exception:
   pass
 PY
-    TOP_N=$(python - <<'PY' "$CONFIG" || echo 100)
-import json,sys
-from pathlib import Path
-try:
-  p=Path(sys.argv[1])
-  txt=p.read_text(encoding='utf-8')
-  if p.suffix.lower() in {'.yaml','.yml'}:
-    import yaml
-    cfg=yaml.safe_load(txt) or {}
-  else:
-    cfg=json.loads(txt)
-  syms=(cfg.get('universe') or {}).get('symbols') or []
-  print(len(syms) if isinstance(syms,list) else 100)
-except Exception:
-  print(100)
-PY
+    # Determine target Top-N for refresh: CLI override (TOP) wins; default 200
+    TOP_N="${TOP:-200}"
     echo "[trainer] refreshing symbols (top=$TOP_N)"
     python -m cryptostorm binance-top --top "$TOP_N" --out "$CONFIG" --print || true
     # Guard: ensure refreshed list still has TOP_N symbols when possible.
