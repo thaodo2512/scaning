@@ -168,7 +168,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--data", type=str, default="data")
     parser.add_argument("--features", type=str, default="features")
     parser.add_argument("--artifacts", type=str, help="Artifacts root override")
-    parser.add_argument("--poll-offset-s", type=float, default=15.0)
+    parser.add_argument("--poll-offset-s", type=float, default=60.0)
     parser.add_argument("--jitter-s", type=float, default=2.0)
     parser.add_argument("--once", action="store_true", help="Run a single cycle immediately")
     parser.add_argument("--log-level", type=str, default="INFO")

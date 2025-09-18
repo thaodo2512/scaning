@@ -101,7 +101,7 @@
 ## Realtime (Phase 1)
 - Single-process loop aligned to 5‑minute UTC bar closes:
   - `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --once` (single cycle)
-  - Continuous: `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --poll-offset-s 10 --jitter-s 2`
+  - Continuous: `PYTHONPATH=src python -m cryptostorm realtime configs/example.yaml --data data --features features --poll-offset-s 60 --jitter-s 2`
   - Steps per cycle: retrieve (incremental) → features `--update-last` → backtest (writes artifacts) → optional Telegram (use `--send-telegram` and env tokens; default kinds: storm,pre_alert)
 - Incremental feature append (without full rebuild):
   - `PYTHONPATH=src python -m cryptostorm feature configs/example.yaml --data data --out features --update-last`
@@ -110,7 +110,7 @@
 - Convenience script to run realtime once (validate → realtime → report):
   - `bash scripts/run_realtime.sh -c configs/example.yaml --online --once --report-engine plotly`
   - Continuous watch (5m-aligned loop), with Telegram alerts (default storm+pre_alert):
-    - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 10 --jitter-s 2 --report-engine plotly`
+    - `SEND_TELEGRAM=1 TELEGRAM_BOT_TOKEN=... TELEGRAM_CHAT_ID=... bash scripts/run_realtime.sh -c configs/example.yaml --online --watch --poll-offset-s 60 --jitter-s 2 --report-engine plotly`
     - `--report-engine` options:
     - `price` (default): Plotly price+alerts only, `<SYM>_price_alert.html`
     - `plotly`: full report with candles, score, OI+liq, `<SYM>_plotly.html`
@@ -135,7 +135,7 @@
 
 ## Realtime (Phase 2)
 - Retrieve watch mode with parallel workers and global RPS limiter:
-  - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --out data --watch --workers 4 --rps 2 --poll-offset-s 10 --jitter-s 2`
+  - `PYTHONPATH=src python -m cryptostorm retrieve configs/example.yaml --out data --watch --workers 4 --rps 2 --poll-offset-s 60 --jitter-s 2`
   - Uses per-file sidecar state at `data/<SYM>/.state/<dataset>.json` to fetch only deltas.
   - Global rate limit applies to all HTTP calls across workers.
 - Notes:

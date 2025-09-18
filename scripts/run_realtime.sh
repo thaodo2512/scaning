@@ -15,7 +15,7 @@ Options:
       --online               Use online scoring (no retrain) in realtime loop
       --once                 Run a single realtime cycle (default)
       --watch                Run continuous 5m-aligned loop (omit --once)
-      --poll-offset-s <sec>  Offset seconds after bar close (default: 15)
+      --poll-offset-s <sec>  Offset seconds after bar close (default: 60)
       --jitter-s <sec>       Random jitter seconds (default: 2)
       --send-telegram        Send alerts via Telegram (env creds required)
       --telegram-kinds <k>   Kinds to send (storm,pre_alert) (default: storm)
@@ -51,7 +51,7 @@ ARTIFACTS_DIR=""
 REPORTS_DIR="reports"
 ONLINE="0"
 ONCE="1"
-POLL_OFFSET="10"
+POLL_OFFSET="60"
 JITTER="2"
 SEND_TG="0"
 TG_KINDS="storm"
