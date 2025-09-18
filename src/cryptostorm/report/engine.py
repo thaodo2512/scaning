@@ -50,8 +50,9 @@ def _to_sec(ts_ms: Any) -> Optional[int]:
 
 
 def _extract_price(data_dir: Path) -> List[Dict[str, Any]]:
-    # Use 15m OHLCV only
-    fp = data_dir / _output_filename("futures_ohlcv_15m")
+    # Prefer 15m OHLCV if available, else 5m (keeps tests and offline cases working)
+    fp15 = data_dir / _output_filename("futures_ohlcv_15m")
+    fp = fp15 if fp15.exists() else (data_dir / _output_filename("futures_ohlcv_5m"))
     recs = _read_jsonl(fp)
     out: List[Dict[str, Any]] = []
     for r in recs:
