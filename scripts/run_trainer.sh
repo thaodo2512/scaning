@@ -402,8 +402,9 @@ with (art/'metrics'/'trainer_runs.jsonl').open('a', encoding='utf-8') as f:
 PY
   # Compose final message: threshold changes + symbol delta + duration
   DUR_MIN=$((TRAIN_DUR/60)); DUR_SEC=$((TRAIN_DUR%60))
-  # Read symbol delta counts from metrics if present
-  SYM_COUNTS=$(python - <<'PY' "$ARTIFACTS_DIR" 2>/dev/null || true)
+  # Read symbol delta counts from metrics if present (suppress errors quietly)
+  SYM_COUNTS="$(
+    python - "$ARTIFACTS_DIR" <<'PY' 2>/dev/null
 import json,sys
 from pathlib import Path
 art=Path(sys.argv[1])
@@ -416,6 +417,7 @@ try:
 except Exception:
   pass
 PY
+  )"
   if [[ -n "$SYM_COUNTS" ]]; then
     FINAL_MSG="$TH_MSG\n$SYM_COUNTS\ntrain_duration: ${DUR_MIN}m ${DUR_SEC}s"
   else
