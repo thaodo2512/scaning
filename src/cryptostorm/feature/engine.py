@@ -776,11 +776,8 @@ def _parallel_features(
     import time as _time
     LOG = logging.getLogger("cryptostorm.feature")
 
-    mode = (
-        ("update_15m" if interval == "15m" else "update_5m")
-        if update_last
-        else ("build_15m" if interval == "15m" else "build_5m")
-    )
+    # Only 15m cadence is supported
+    mode = ("update_15m" if update_last else "build_15m")
     symbols = list(eff.symbols)
     max_workers = int(workers if workers and workers > 0 else (_os.cpu_count() or 1))
     max_workers = max(1, max_workers)
@@ -1294,7 +1291,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--out", type=str, default="features", help="Output features root")
     parser.add_argument("--log-level", type=str, default="INFO")
     parser.add_argument("--update-last", action="store_true", help="Append exactly one latest row per symbol")
-    parser.add_argument("--interval", type=str, choices=["5m", "15m"], default="15m", help="Feature cadence to build (default: 15m)")
+    parser.add_argument("--interval", type=str, choices=["15m"], default="15m", help="Feature cadence to build (default: 15m)")
     parser.add_argument("--workers", type=int, default=1, help="Worker processes for per-symbol parallelism (default: 1)")
     args = parser.parse_args(argv)
 

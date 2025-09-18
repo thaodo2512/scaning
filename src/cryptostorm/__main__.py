@@ -57,7 +57,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_feat.add_argument("--data", type=str, default="data")
     p_feat.add_argument("--out", type=str, default="features")
     p_feat.add_argument("--log-level", type=str, default="INFO")
-    p_feat.add_argument("--interval", type=str, choices=["5m", "15m"], default="15m")
+    p_feat.add_argument("--interval", type=str, choices=["15m"], default="15m")
     p_feat.add_argument("--update-last", action="store_true")
     p_feat.add_argument("--workers", type=int, default=1)
 
@@ -65,7 +65,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_bt.add_argument("config", type=str)
     p_bt.add_argument("--features", type=str, default="features")
     p_bt.add_argument("--artifacts-root", type=str)
-    p_bt.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
+    p_bt.add_argument("--features-interval", type=str, choices=["15m", "auto"], default="auto")
     p_bt.add_argument("--workers", type=int, default=1)
 
     p_rep = sub.add_parser("report", help="Generate per-symbol HTML reports")
@@ -81,7 +81,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rep2.add_argument("--artifacts", type=str)
     p_rep2.add_argument("--out", type=str, default="reports")
 
-    p_rep3 = sub.add_parser("report-plotly", help="Generate full Plotly reports (candles, score, OI+liq)")
+    p_rep3 = sub.add_parser("report-plotly", help="Generate full Plotly reports (candles, score)")
     p_rep3.add_argument("config", type=str)
     p_rep3.add_argument("--data", type=str, default="data")
     p_rep3.add_argument("--artifacts", type=str)
@@ -115,7 +115,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     p_rt.add_argument("--build-reports", action="store_true")
     p_rt.add_argument("--reports", type=str, default="reports")
     p_rt.add_argument("--report-engine", type=str, choices=["plotly", "lightweight", "price"], default="price")
-    p_rt.add_argument("--bar-interval", type=str, choices=["5m", "15m", "auto"], default="auto")
+    p_rt.add_argument("--bar-interval", type=str, choices=["15m", "auto"], default="auto")
     p_rt.add_argument("--workers", type=int, default=0)
     p_rt.add_argument("--coinglass-rps", type=float, default=4.1667)
     p_rt.add_argument("--reload-config", action="store_true")

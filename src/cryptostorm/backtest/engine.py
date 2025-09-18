@@ -1213,7 +1213,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--features", type=str, default="features")
     parser.add_argument("--artifacts-root", type=str, help="Override artifacts root; defaults to run.artifacts_root/run_id")
     parser.add_argument("--online", action="store_true", help="Score only latest row using persisted artifacts (no retrain)")
-    parser.add_argument("--features-interval", type=str, choices=["5m", "15m", "auto"], default="auto", help="Select which features cadence to use (default: auto)")
+    parser.add_argument("--features-interval", type=str, choices=["15m", "auto"], default="auto", help="Select which features cadence to use (default: auto)")
     parser.add_argument("--workers", type=int, default=1, help="Worker processes for per-symbol parallelism (default: 1)")
     args = parser.parse_args(argv)
 

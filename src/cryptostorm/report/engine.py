@@ -50,9 +50,8 @@ def _to_sec(ts_ms: Any) -> Optional[int]:
 
 
 def _extract_price(data_dir: Path) -> List[Dict[str, Any]]:
-    # Prefer 15m OHLCV if available, else 5m
-    fp15 = data_dir / _output_filename("futures_ohlcv_15m")
-    fp = fp15 if fp15.exists() else (data_dir / _output_filename("futures_ohlcv_5m"))
+    # Use 15m OHLCV only
+    fp = data_dir / _output_filename("futures_ohlcv_15m")
     recs = _read_jsonl(fp)
     out: List[Dict[str, Any]] = []
     for r in recs:
@@ -340,8 +339,8 @@ def build_reports(cfg: Mapping[str, Any], eff: EffectiveConfig, *, data_root: Pa
         sc = _read_scores(scores_fp)
         al = _read_alerts(alerts_fp)
         overlays: Dict[str, List[Dict[str, Any]]] = {}
-        # Optional funding overlay: use features if present
-        feat_fp = features_root / sym / "features_5m.csv"
+        # Optional funding overlay: use 15m features if present
+        feat_fp = features_root / sym / "features_15m.csv"
         if feat_fp.exists():
             try:
                 arr: List[Dict[str, Any]] = []
